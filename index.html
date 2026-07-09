@@ -2556,10 +2556,121 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
   .members-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 32px; }
 }
 
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE / MOBILE
+══════════════════════════════════════════════════════════ */
+
+/* ── Mobile drawer controls (hidden on desktop) ── */
+.mobile-drawer-btn {
+  display: none;
+  width: 34px; height: 34px; border-radius: 8px;
+  border: none; background: transparent; color: var(--c-text-mute);
+  align-items: center; justify-content: center; cursor: pointer;
+  flex-shrink: 0; transition: background 0.2s, color 0.2s;
+}
+.mobile-drawer-btn:hover { background: rgb(var(--c-primary-rgb) / 0.12); color: var(--c-primary); }
+.mobile-drawer-btn svg { width: 18px; height: 18px; fill: currentColor; }
+#mobile-drawer-backdrop {
+  display: none;
+  position: fixed; left: 0; right: 0; top: 44px; bottom: 0;
+  background: rgb(0 0 0 / 0.45);
+  z-index: 250;
+}
+
+/* ── Tablet / phone: story-mode 3 欄改為抽屜式 ── */
+@media (max-width: 860px) {
+  body:not(.site-mode) #col-left,
+  body:not(.site-mode) #col-right {
+    position: fixed;
+    top: 44px; bottom: 0;
+    width: min(84vw, 300px) !important;
+    background: var(--c-bg);
+    z-index: 300;
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+    box-shadow: var(--shadow-lg);
+  }
+  body:not(.site-mode) #col-left { left: 0; transform: translateX(-100%); }
+  body:not(.site-mode) #col-right { right: 0; transform: translateX(100%); }
+  body.mobile-left-open:not(.site-mode) #col-left { transform: translateX(0); }
+  body.mobile-right-open:not(.site-mode) #col-right { transform: translateX(0); }
+  body.mobile-left-open #mobile-drawer-backdrop,
+  body.mobile-right-open #mobile-drawer-backdrop { display: block; }
+
+  body:not(.site-mode) .col-resizer { display: none; }
+  body:not(.site-mode) #col-mid { width: 100%; }
+  body:not(.site-mode) .col-toggle-btn { display: none; }
+
+  .mobile-drawer-btn { display: flex; }
+
+  #mid-header { padding: 12px 12px; gap: 8px; }
+  #mid-header-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #message-list { padding: 20px 14px 32px; }
+  .msg-col { max-width: 86%; }
+}
+
+/* ── 手機：Topbar / Site Nav 精簡 ── */
+@media (max-width: 640px) {
+  #app-topbar { padding: 0 10px; }
+  #app-topbar .brand { font-size: 11px; letter-spacing: 1.5px; }
+  .topbar-mode-btn { padding: 4px 10px; font-size: 11px; }
+  #topbar-right { width: auto; gap: 4px; }
+  #export-all-btn span, #import-all-btn span { display: none; }
+  #export-all-btn, #import-all-btn { min-width: 32px; padding: 0; }
+
+  #site-nav { padding: 0 4px; }
+  .site-nav-item { flex: 1; padding: 14px 8px; font-size: 11px; letter-spacing: 1.5px; text-align: center; }
+  .site-nav-item::after { left: 8px; right: 8px; }
+
+  #page-poster { padding: 24px 16px 0; }
+  #page-music { padding: 24px 16px; }
+  #page-tour { padding: 24px 16px; }
+  #page-about { padding: 24px 16px; }
+  .about-page-title { font-size: 22px; margin-bottom: 32px; }
+  .music-page-title, .tour-page-title { font-size: 22px; }
+
+  /* IG 詳情 Modal：改為上下堆疊 */
+  .ig-modal-box {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    width: min(94vw, 480px);
+    height: min(92vh, 640px);
+  }
+  .ig-modal-right { border-left: none; border-top: 1px solid rgb(var(--c-primary-rgb) / 0.10); max-height: 46vh; }
+  #ig-modal-nav-prev { left: 6px; width: 38px; height: 38px; }
+  #ig-modal-nav-next { right: 6px; width: 38px; height: 38px; }
+
+  /* Poster Modal：改為上下堆疊 */
+  .poster-modal-layout { grid-template-columns: 1fr; }
+  .poster-modal-right { border-left: none; border-top: 1px solid var(--c-primary-border); }
+
+  /* Tour Modal：欄位改單欄 */
+  .tour-modal-box { padding: 20px; }
+  .tour-modal-grid { grid-template-columns: 1fr; }
+
+  /* Music 卡片展開後改為上下堆疊，避免橫向溢出 */
+  .music-card { width: 100%; max-width: 100%; }
+  .music-card.is-open { flex-direction: column; height: auto; }
+  .music-card.is-open .music-expand-wrap { flex-direction: column; width: 100% !important; }
+  .music-player-panel, .music-lyrics-panel {
+    width: 100%; box-sizing: border-box;
+    border-left: none; border-right: none;
+    border-top: 1px solid var(--c-primary-border);
+    padding-left: 20px; padding-right: 20px;
+  }
+  .music-lyrics-label { letter-spacing: 3px; }
+  .music-default-space { width: 100%; }
+}
+
+@media (max-width: 480px) {
+  #app-topbar .brand { display: none; }
+  .members-grid { grid-template-columns: 1fr; gap: 28px; }
+}
+
 </style>
 </head>
 <body>
 <div id="bg-layer"></div>
+<div id="mobile-drawer-backdrop"></div>
 
 <!-- ── App Topbar ─────────────────────────────────────── -->
 <div id="app-topbar">
@@ -2859,7 +2970,13 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
   <div id="mid-overlay"></div>
   
   <div id="mid-header">
+    <button id="mobile-left-toggle" class="mobile-drawer-btn" type="button" title="開啟故事列表" aria-label="開啟故事列表">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+    </button>
     <span id="mid-header-title" data-i18n="mid.defaultTitle">未歸類故事</span>
+    <button id="mobile-right-toggle" class="mobile-drawer-btn" type="button" title="開啟事件與歌單" aria-label="開啟事件與歌單">
+      <svg viewBox="0 0 24 24"><path d="M17 3a1 1 0 0 1 1 1v16a1 1 0 0 1-1.55.83L12 17.06l-4.45 3.77A1 1 0 0 1 6 20V4a1 1 0 0 1 1-1h10z"/></svg>
+    </button>
   </div>
   
   <!-- 訊息列表模式 -->
@@ -5555,6 +5672,8 @@ function updateMidHeaderTitle(title) {
 }
 
 async function switchView(id, title) {
+  // 手機版：選擇故事後自動收起左側抽屜
+  if (window._closeMobileDrawers) window._closeMobileDrawers();
   // 切換前先記住當前 view 的捲動位置
   captureCurrentScrollAnchor();
   S.view = id;
@@ -7228,6 +7347,32 @@ $('bg-input').addEventListener('change', e => handleImageUpload(e, 'bgImage', up
 })();
 
 /* ══════════════════════════════════════════════════════════
+   Mobile Drawers（手機版：左右欄改為抽屜）
+══════════════════════════════════════════════════════════ */
+(function() {
+  const backdrop = $('mobile-drawer-backdrop');
+  const btnLeft = $('mobile-left-toggle');
+  const btnRight = $('mobile-right-toggle');
+
+  function closeMobileDrawers() {
+    document.body.classList.remove('mobile-left-open', 'mobile-right-open');
+  }
+  function toggleDrawer(side) {
+    const cls = side === 'left' ? 'mobile-left-open' : 'mobile-right-open';
+    const wasOpen = document.body.classList.contains(cls);
+    closeMobileDrawers();
+    if (!wasOpen) document.body.classList.add(cls);
+  }
+
+  btnLeft.addEventListener('click', () => toggleDrawer('left'));
+  btnRight.addEventListener('click', () => toggleDrawer('right'));
+  backdrop.addEventListener('click', closeMobileDrawers);
+  window.addEventListener('resize', () => { if (window.innerWidth > 860) closeMobileDrawers(); });
+
+  window._closeMobileDrawers = closeMobileDrawers;
+})();
+
+/* ══════════════════════════════════════════════════════════
    Scroll Actions
 ══════════════════════════════════════════════════════════ */
 $('btn-scroll-top').addEventListener('click', () => {
@@ -8460,6 +8605,11 @@ $('music-add-btn').addEventListener('click', () => {
   switchMode('story');
   switchRightTab('songs');
   startNewSong();
+  // 手機版：右欄為抽屜，需主動展開才看得到表單
+  if (window.innerWidth <= 860) {
+    document.body.classList.remove('mobile-left-open');
+    document.body.classList.add('mobile-right-open');
+  }
 });
 
 /* ══════════════════════════════════════════════════════════
