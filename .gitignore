@@ -1,0 +1,7 @@
+# Personal backup exports (large, contains private story data)
+backups/
+
+# Local tooling, not part of the site
+.claude/
+.agents/
+scripts/
