@@ -7321,19 +7321,21 @@ $('avatar-player-name').addEventListener('click', e => {
   renameRoleLabel('player');
 });
 
-function handleImageUpload(e, stateKey, callback) {
+async function handleImageUpload(e, stateKey, callback, maxEdge = IMG_MAX_EDGE) {
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
-  setAssetUrl(stateKey, file);
-  idbPutAsset(stateKey, file).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
+  const stored = await compressImage(file, maxEdge); // 存入前先壓縮，節省 IndexedDB 空間
+  setAssetUrl(stateKey, stored);
+  idbPutAsset(stateKey, stored).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
   callback();
   save();
-  e.target.value = '';
 }
 
-$('avatar-char-input').addEventListener('change', e => handleImageUpload(e, 'avatarChar', () => { updateAvatarSlotUI(); renderMsgs(); }));
-$('avatar-player-input').addEventListener('change', e => handleImageUpload(e, 'avatarPlayer', () => { updateAvatarSlotUI(); renderMsgs(); }));
-$('bg-input').addEventListener('change', e => handleImageUpload(e, 'bgImage', updateBgUI));
+// 頭像顯示尺寸小（44px 圓形），512px 已含 retina 餘裕；背景圖需鋪滿桌面螢幕，保留 1920px
+$('avatar-char-input').addEventListener('change', e => handleImageUpload(e, 'avatarChar', () => { updateAvatarSlotUI(); renderMsgs(); }, 512));
+$('avatar-player-input').addEventListener('change', e => handleImageUpload(e, 'avatarPlayer', () => { updateAvatarSlotUI(); renderMsgs(); }, 512));
+$('bg-input').addEventListener('change', e => handleImageUpload(e, 'bgImage', updateBgUI, 1920));
 
 /* ══════════════════════════════════════════════════════════
    Column Resizers
@@ -8595,14 +8597,16 @@ $('music-cover-input').addEventListener('change', async e => {
   }
   const song = S.songs.find(s => s.id === _pendingCoverSongId);
   if (!song) { e.target.value = ''; _pendingCoverSongId = null; return; }
+  // 存入前先壓縮（封面顯示最大 160px，800px 已綽綽有餘）
+  const stored = await compressImage(file, 800);
   // 釋放舊的 objectURL
   revokeCoverUrl(song.id);
   // 建立新的 objectURL
-  const objectUrl = URL.createObjectURL(file);
+  const objectUrl = URL.createObjectURL(stored);
   _coverUrlCache.set(song.id, objectUrl);
   song.cover = objectUrl;
   // 非同步存入 IDB
-  idbPutCover({ songId: song.id, blob: file, fileName: file.name || '' })
+  idbPutCover({ songId: song.id, blob: stored, fileName: stored.name || '' })
     .catch(err => { console.warn('IDB cover write:', err); notifyStorageError(err, 'media'); });
   save();
   renderMusicPage();
@@ -8976,12 +8980,14 @@ function renderAbout() {
         if (!file) return;
         if (!SS.members[idx].id) SS.members[idx].id = uid();
         const key = `member_photo_${SS.members[idx].id}`;
+        // 存入前先壓縮
+        const stored = await compressImage(file, IMG_MAX_EDGE);
         // 釋放舊的 objectURL
         if (m.photo && m.photo.startsWith('blob:')) URL.revokeObjectURL(m.photo);
         // 存入 IDB
-        await idbPutAsset(key, file).catch(err => { console.warn('IDB member photo write:', err); notifyStorageError(err, 'media'); });
+        await idbPutAsset(key, stored).catch(err => { console.warn('IDB member photo write:', err); notifyStorageError(err, 'media'); });
         // 建立新的 objectURL
-        const objectUrl = URL.createObjectURL(file);
+        const objectUrl = URL.createObjectURL(stored);
         SS.members[idx].photo = objectUrl;
         saveSite();
         renderAbout();
