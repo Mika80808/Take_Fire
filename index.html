@@ -1116,6 +1116,63 @@ body.right-fullscreen #col-right {
   cursor: text;
 }
 
+/* ── Background Picker（多張背景圖庫 modal）──────────── */
+.bg-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.bg-tile {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid var(--c-primary-border);
+  background: rgb(var(--c-text-rgb, 0 0 0) / 0.04);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s, color 0.15s;
+}
+.bg-tile:hover { border-color: var(--c-primary); }
+.bg-tile.selected {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 2px rgb(var(--c-primary-rgb) / 0.25);
+}
+.bg-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bg-tile-none, .bg-tile-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--c-text-mute);
+  font-size: 12px;
+  font-weight: 600;
+  border-style: dashed;
+}
+.bg-tile-add .bg-add-plus { font-size: 20px; line-height: 1; }
+.bg-tile-none:hover, .bg-tile-add:hover { color: var(--c-primary); background: var(--c-primary-mute); }
+.bg-tile-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bg-tile-del:hover { background: rgb(var(--c-danger-rgb) / 0.9); }
+
 /* ── Background Image in Middle Column ──────────────── */
 #mid-bg {
   position: absolute;
@@ -2956,7 +3013,7 @@ body.mobile-right-open #mobile-right-btn {
   <input type="file" id="file-input" accept=".txt" multiple hidden>
   <input type="file" id="avatar-char-input" accept="image/*" hidden>
   <input type="file" id="avatar-player-input" accept="image/*" hidden>
-  <input type="file" id="bg-input" accept="image/*" hidden>
+  <input type="file" id="bg-input" accept="image/*" multiple hidden>
   
   <button class="btn-modern upload-btn" id="upload-btn">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.8;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
@@ -2977,7 +3034,7 @@ body.mobile-right-open #mobile-right-btn {
       </div>
       <div class="avatar-slot-label" id="avatar-player-name" data-i18n="left.avatarPlayer">玩家</div>
     </div>
-    <div class="avatar-slot" id="bg-slot" title="點擊上傳對話背景" data-i18n-title="left.bgTip">
+    <div class="avatar-slot" id="bg-slot" title="點擊管理對話背景" data-i18n-title="left.bgTip">
       <div class="avatar-slot-img" id="bg-slot-img">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
       </div>
@@ -3190,11 +3247,14 @@ function openPosterDB() {
   if (_idb) return Promise.resolve(_idb);
   if (_idbPromise) return _idbPromise;
   _idbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open('tak_fire_db', 4);
+    const req = indexedDB.open('tak_fire_db', 5);
     req.onupgradeneeded = e => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains('posters')) {
         db.createObjectStore('posters', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('backgrounds')) {
+        db.createObjectStore('backgrounds', { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains('song_covers')) {
         db.createObjectStore('song_covers', { keyPath: 'songId' });
@@ -3306,6 +3366,20 @@ async function loadAllAssets() {
     }
   }));
   return loaded;
+}
+
+/* ── Background Gallery IDB helpers（多張背景圖庫，record: { id, blob, name, ts }） ── */
+const idbGetAllBackgrounds = () => idbGetAll('backgrounds');
+const idbPutBackground     = (record) => idbPut('backgrounds', record);
+const idbDeleteBackground  = (id) => idbDelete('backgrounds', id);
+
+const _bgUrlCache = new Map(); // id → objectURL
+
+function getBgObjectUrl(record) {
+  if (_bgUrlCache.has(record.id)) return _bgUrlCache.get(record.id);
+  const url = URL.createObjectURL(record.blob);
+  _bgUrlCache.set(record.id, url);
+  return url;
 }
 
 /* ── Song Cover IDB helpers ── */
@@ -3601,7 +3675,7 @@ async function exportAllData() {
   }
 }
 
-const IMPORT_STORES = ['posters', 'song_covers', 'app_assets', 'song_mp3s', 'messages'];
+const IMPORT_STORES = ['posters', 'song_covers', 'app_assets', 'song_mp3s', 'messages', 'backgrounds'];
 
 // 清空並以 idbData（exportStoreRecords 格式：blob 已轉 base64）還原指定的 IDB stores。
 // 供 importAllData 的正式匯入與失敗後的還原（rollback）共用，確保兩者行為一致。
@@ -3740,7 +3814,12 @@ const I18N = {
     'left.bg': '背景',
     'left.avatarCharTip': '點擊更換樂團頭像',
     'left.avatarPlayerTip': '點擊更換玩家頭像',
-    'left.bgTip': '點擊上傳對話背景',
+    'left.bgTip': '點擊管理對話背景',
+    'bg.title': '對話背景圖庫',
+    'bg.desc': '可儲存多張背景圖，點擊縮圖即可切換',
+    'bg.none': '無背景',
+    'bg.add': '新增背景',
+    'bg.deleteTip': '刪除此背景',
     'left.addFolder': '新增資料夾',
     'left.sortToggle': '切換排序',
     'left.trash': '拖曳至此刪除',
@@ -3957,7 +4036,12 @@ const I18N = {
     'left.bg': 'Background',
     'left.avatarCharTip': 'Click to change band avatar',
     'left.avatarPlayerTip': 'Click to change player avatar',
-    'left.bgTip': 'Click to upload chat background',
+    'left.bgTip': 'Click to manage chat backgrounds',
+    'bg.title': 'Chat Backgrounds',
+    'bg.desc': 'Save multiple background images and tap a thumbnail to switch.',
+    'bg.none': 'None',
+    'bg.add': 'Add',
+    'bg.deleteTip': 'Delete this background',
     'left.addFolder': 'New folder',
     'left.sortToggle': 'Toggle sort',
     'left.trash': 'Drag here to delete',
@@ -4312,6 +4396,7 @@ const S = {
   avatarChar   : null,
   avatarPlayer : null,
   bgImage      : null,
+  bgActiveId   : null,   // 目前套用中的背景圖庫 id（圖庫本體存 IDB backgrounds store）
   roleLabels   : { character: '', player: '' },
   settings: { theme: 'jazz', font: 'system' }
 };
@@ -4347,7 +4432,8 @@ function saveNow() {
       rightTab    : S.rightTab,
       calendarCollapsed: S.calendarCollapsed,
       collapsedFolders: [...S.collapsedFolders],
-      roleLabels  : S.roleLabels
+      roleLabels  : S.roleLabels,
+      bgActiveId  : S.bgActiveId
     }));
     if (!persisted) {
       notifyStorageError(new Error('localStorage unavailable'));
@@ -4461,6 +4547,7 @@ function load() {
     S.calendarCollapsed = !!d.calendarCollapsed;
     S.collapsedFolders = new Set(Array.isArray(d.collapsedFolders) ? d.collapsedFolders : []);
     S.roleLabels  = { character: '', player: '', ...(d.roleLabels || {}) };
+    S.bgActiveId  = typeof d.bgActiveId === 'string' ? d.bgActiveId : null;
     S.avatarChar  = null;
     S.avatarPlayer= null;
     S.bgImage     = null;
@@ -7310,7 +7397,115 @@ function updateBgUI() {
 
 $('avatar-char-slot').addEventListener('click', () => $('avatar-char-input').click());
 $('avatar-player-slot').addEventListener('click', () => $('avatar-player-input').click());
-$('bg-slot').addEventListener('click', () => $('bg-input').click());
+$('bg-slot').addEventListener('click', () => openBgPicker());
+
+/* ══════════════════════════════════════════════════════════
+   Background Gallery — 多張背景圖庫（IDB backgrounds store）
+══════════════════════════════════════════════════════════ */
+let _bgPickerRecords = [];
+
+async function setActiveBackground(record) {
+  if (record) {
+    setAssetUrl('bgImage', record.blob);
+    S.bgActiveId = record.id;
+    // 套用中的背景同步寫回 app_assets.bgImage，開機載入路徑（loadAllAssets）維持不變
+    idbPutAsset('bgImage', record.blob).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
+  } else {
+    if (_assetUrlCache.has('bgImage')) {
+      URL.revokeObjectURL(_assetUrlCache.get('bgImage'));
+      _assetUrlCache.delete('bgImage');
+    }
+    S.bgImage = null;
+    S.bgActiveId = null;
+    idbDelete('app_assets', 'bgImage').catch(err => console.warn('IDB asset delete:', err));
+  }
+  updateBgUI();
+  save();
+}
+
+async function deleteBackgroundRecord(id) {
+  try { await idbDeleteBackground(id); } catch (e) { console.warn('idbDeleteBackground:', e); }
+  if (_bgUrlCache.has(id)) {
+    URL.revokeObjectURL(_bgUrlCache.get(id));
+    _bgUrlCache.delete(id);
+  }
+  _bgPickerRecords = _bgPickerRecords.filter(r => r.id !== id);
+  if (S.bgActiveId === id) setActiveBackground(null);
+  renderBgGrid();
+}
+
+function renderBgGrid() {
+  const grid = $('bg-picker-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  _bgPickerRecords.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+  const noneTile = document.createElement('div');
+  noneTile.className = 'bg-tile bg-tile-none' + (S.bgActiveId || S.bgImage ? '' : ' selected');
+  const noneLabel = document.createElement('span');
+  noneLabel.textContent = t('bg.none');
+  noneTile.appendChild(noneLabel);
+  noneTile.addEventListener('click', () => { setActiveBackground(null); renderBgGrid(); });
+  grid.appendChild(noneTile);
+
+  _bgPickerRecords.forEach(rec => {
+    const tile = document.createElement('div');
+    tile.className = 'bg-tile' + (rec.id === S.bgActiveId ? ' selected' : '');
+    const img = document.createElement('img');
+    img.src = getBgObjectUrl(rec);
+    img.alt = rec.name || '';
+    tile.appendChild(img);
+    const del = document.createElement('button');
+    del.className = 'bg-tile-del';
+    del.title = t('bg.deleteTip');
+    del.textContent = '×';
+    del.addEventListener('click', e => { e.stopPropagation(); deleteBackgroundRecord(rec.id); });
+    tile.appendChild(del);
+    tile.addEventListener('click', () => { setActiveBackground(rec); renderBgGrid(); });
+    grid.appendChild(tile);
+  });
+
+  const addTile = document.createElement('div');
+  addTile.className = 'bg-tile bg-tile-add';
+  const plus = document.createElement('span');
+  plus.className = 'bg-add-plus';
+  plus.textContent = '＋';
+  const addLabel = document.createElement('span');
+  addLabel.textContent = t('bg.add');
+  addTile.appendChild(plus);
+  addTile.appendChild(addLabel);
+  addTile.addEventListener('click', () => $('bg-input').click());
+  grid.appendChild(addTile);
+}
+
+async function openBgPicker() {
+  let records = [];
+  try { records = await idbGetAllBackgrounds(); } catch (e) { console.warn('idbGetAllBackgrounds:', e); }
+  // 舊版只有單張背景（app_assets.bgImage）：首次開啟圖庫時將它搬進來，之後即可多張管理
+  if (!records.length && S.bgImage) {
+    try {
+      const rec = await idbGetAsset('bgImage');
+      if (rec?.blob instanceof Blob) {
+        const migrated = { id: uid(), blob: rec.blob, name: '', ts: Date.now() };
+        await idbPutBackground(migrated);
+        S.bgActiveId = migrated.id;
+        save();
+        records = [migrated];
+      }
+    } catch (e) { console.warn('bg migrate:', e); }
+  }
+  _bgPickerRecords = records;
+  showModal({
+    title: t('bg.title'),
+    desc: t('bg.desc'),
+    customHtml: '<div class="bg-picker-grid" id="bg-picker-grid"></div>',
+    confirmText: t('msg.ok'),
+    // 點選縮圖即時套用，modal 只需一顆「確定」；隱藏取消鍵並於關閉時還原
+    onOpen: () => { $('modal-cancel').style.display = 'none'; renderBgGrid(); },
+    onConfirm: () => { $('modal-cancel').style.display = ''; },
+    onCancel: () => { $('modal-cancel').style.display = ''; }
+  });
+}
 
 $('avatar-char-name').addEventListener('click', e => {
   e.stopPropagation();
@@ -7333,7 +7528,26 @@ function handleImageUpload(e, stateKey, callback) {
 
 $('avatar-char-input').addEventListener('change', e => handleImageUpload(e, 'avatarChar', () => { updateAvatarSlotUI(); renderMsgs(); }));
 $('avatar-player-input').addEventListener('change', e => handleImageUpload(e, 'avatarPlayer', () => { updateAvatarSlotUI(); renderMsgs(); }));
-$('bg-input').addEventListener('change', e => handleImageUpload(e, 'bgImage', updateBgUI));
+
+// 背景改走圖庫：可一次選多張，全部存入 backgrounds store，最後一張直接套用
+let _bgUploadSeq = 0;
+$('bg-input').addEventListener('change', async e => {
+  const files = Array.from(e.target.files || []).filter(f => /^image\//i.test(f.type));
+  e.target.value = '';
+  if (!files.length) return;
+  let lastRec = null;
+  for (const file of files) {
+    const stored = await compressImage(file, 1920); // 背景鋪滿全螢幕，長邊放寬到 1920
+    const rec = { id: uid(), blob: stored, name: file.name || '', ts: Date.now() + (_bgUploadSeq++) };
+    try {
+      await idbPutBackground(rec);
+    } catch (err) { console.warn('IDB bg write:', err); notifyStorageError(err, 'media'); }
+    _bgPickerRecords.push(rec);
+    lastRec = rec;
+  }
+  if (lastRec) setActiveBackground(lastRec);
+  renderBgGrid();
+});
 
 /* ══════════════════════════════════════════════════════════
    Column Resizers
