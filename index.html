@@ -7912,17 +7912,50 @@ function openPosterModal(posterId) {
   $('poster-modal-overlay').classList.add('open');
 }
 
+/* ── 圖片壓縮：長邊縮至 1600px、轉存 WebP（不支援則退回 JPEG/PNG），
+   手機拍照動輒 5–10MB，壓縮後通常只剩十分之一，大幅節省 IndexedDB 空間 ── */
+const IMG_MAX_EDGE  = 1600;
+const IMG_QUALITY   = 0.82;
+const IMG_SKIP_SIZE = 400 * 1024; // 小檔且不需縮邊就直接存原檔
+
+async function compressImage(file, maxEdge = IMG_MAX_EDGE, quality = IMG_QUALITY) {
+  // GIF（動畫）、SVG（向量）等格式不重壓，避免破壞內容
+  if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) return file;
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch { return file; } // 解碼失敗就存原檔
+  const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
+  if (scale === 1 && file.size <= IMG_SKIP_SIZE) { bmp.close(); return file; }
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.max(1, Math.round(bmp.width  * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  const toBlob = type => new Promise(res => canvas.toBlob(res, type, quality));
+  let out = await toBlob('image/webp');
+  if (!out || out.type !== 'image/webp') {
+    // 舊瀏覽器不支援 WebP 編碼：PNG 保留透明度，其餘轉 JPEG
+    out = await toBlob(file.type === 'image/png' ? 'image/png' : 'image/jpeg');
+  }
+  if (!out || out.size >= file.size) return file; // 沒有變小就不採用
+  const ext = { 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png' }[out.type] || '';
+  return new File([out], file.name.replace(/\.[^.]+$/, '') + ext, { type: out.type });
+}
+
 $('pm-upload-area').addEventListener('click', () => $('pm-file-input').click());
-$('pm-file-input').addEventListener('change', e => {
+let _pmPickSeq = 0;
+$('pm-file-input').addEventListener('change', async e => {
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
-  _pmFile = file;
-  const url = URL.createObjectURL(file);
+  const seq = ++_pmPickSeq;
+  const stored = await compressImage(file);
+  if (seq !== _pmPickSeq) return; // 使用者已改選其他圖片
+  _pmFile = stored;
+  const url = URL.createObjectURL(stored);
   const preview = $('pm-preview');
   preview.src = url;
   preview.style.display = 'block';
   $('pm-placeholder').style.display = 'none';
-  e.target.value = '';
 });
 
 $('pm-save').addEventListener('click', async () => {
