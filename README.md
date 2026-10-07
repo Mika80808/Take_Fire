@@ -22,6 +22,7 @@ Take Fire 樂團的故事整理工具與官網原型，純前端、無後端。�
 | `tak_fire_v2_sys` | 系統設定：主題、字體、字級、語言 | ✅ |
 | `tak_fire_site_v1` | 官網資料：Tour 行程、成員資料（不含照片）、目前分頁 | ✅ |
 | `tak_fire_view_v1` | 目前開啟的資料夾與各資料夾的捲動位置 | ❌ |
+| `tak_fire_guide_v1` | 新手導覽是否已看過 | ❌ |
 
 `tak_fire_view_v1` 不進備份是刻意的——那只是瀏覽狀態，不是內容。
 
@@ -69,9 +70,10 @@ style.css    全部樣式（開頭是堆疊層級與色彩 token）
 core.js      IndexedDB 層、localStorage 包裝、i18n 字典、工具函式、S 狀態、匯出匯入
 story.js     Story Mode 的渲染與互動、開機流程
 site.js      SS 狀態、官網四個頁面、IG 檢視、行動抽屜
+guide.js     Story Mode 新手導覽（第一次開啟時出現，系統設定可重看）
 ```
 
-三個 js 用一般 `<script>` 標籤依序載入，**不是 ES module**，彼此靠全域變數溝通
+四個 js 用一般 `<script>` 標籤依序載入，**不是 ES module**，彼此靠全域變數溝通
 （`S`、`SS`、`$`、`t`、`esc` 與各 `idb*` 函式）。因此**載入順序不能調換**，
 也不要在 `<script>` 上加 `defer` 或 `type="module"`。
 
