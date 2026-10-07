@@ -762,6 +762,84 @@ function updateSongDragHover(clientX, clientY) {
   }
 }
 
+/* ── 資料夾順序 ──
+   createdAt 兼作排序鍵：側欄、事件列表、匯出順序都依它排。手動調整順序時改寫同一層
+   兄弟資料夾的 createdAt，沿用舊欄位就不必遷移資料，舊備份也相容。
+   只有兩層：有子資料夾的資料夾不能再被放進別的資料夾，否則它的子資料夾會從側欄消失。 */
+function folderSiblings(parentId, excludeId) {
+  return S.folders
+    .filter(f => (f.parentId || null) === parentId && f.id !== excludeId)
+    .sort((a, b) => S.folderSort === 'desc' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt);
+}
+
+// list 為側欄由上而下的順序；重編鍵值讓目前的排序方向剛好呈現這個順序
+function applyFolderOrder(list) {
+  const base = Math.min(...list.map(f => f.createdAt || 0));
+  const n = list.length;
+  list.forEach((f, i) => { f.createdAt = base + (S.folderSort === 'desc' ? n - 1 - i : i); });
+}
+
+// 把 folder 放到 target 的前面或後面，並成為 target 的同層資料夾
+function placeFolder(folder, target, pos) {
+  const parentId = target.parentId || null;
+  folder.parentId = parentId;
+  const list = folderSiblings(parentId, folder.id);
+  list.splice(list.indexOf(target) + (pos === 'after' ? 1 : 0), 0, folder);
+  applyFolderOrder(list);
+}
+
+const folderHasChildren = folder => S.folders.some(f => f.parentId === folder.id);
+
+// 拖曳資料夾時，游標下的落點：上緣＝放前面、下緣＝放後面、中間＝變成子資料夾
+function folderDropTarget(x, y) {
+  const dragged = S.folders.find(f => f.id === S.dragFolderId);
+  if (!dragged) return null;
+  const hit = _dragFolderRects.find(({ fid, rect: r }) =>
+    fid !== '__unc__' && fid !== dragged.id &&
+    x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+  if (!hit) return null;
+  const target = S.folders.find(f => f.id === hit.fid);
+  if (!target || target.parentId === dragged.id) return null;
+
+  const rel = (y - hit.rect.top) / hit.rect.height;
+  let mode;
+  if (target.parentId) {
+    mode = rel < 0.5 ? 'before' : 'after';
+  } else if (rel < 0.3) {
+    mode = 'before';
+  } else if (rel > 0.7 && !hit.el.classList.contains('expanded-parent')) {
+    // 展開中的母資料夾下緣緊接著它的子資料夾，那裡當「放後面」會讓人誤會，改當放進去
+    mode = 'after';
+  } else {
+    mode = 'inside';
+  }
+  const becomesChild = mode === 'inside' || !!target.parentId;
+  if (becomesChild && folderHasChildren(dragged)) return null;
+  return { el: hit.el, target, mode };
+}
+
+// 移動後刷新：母資料夾的訊息與事件包含子資料夾的，正在看的若是受影響的母資料夾就重載
+function afterFolderMove(oldParent, newParent) {
+  renderFolders();
+  save();
+  if (S.view && (S.view === oldParent || S.view === newParent) && oldParent !== newParent) {
+    renderMsgs();
+    if (S.rightTab === 'events') renderRight();
+  }
+}
+
+function moveFolderBy(folder, delta) {
+  const list = folderSiblings(folder.parentId || null, null);
+  const i = list.indexOf(folder);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  applyFolderOrder(list);
+  renderFolders();
+  save();
+  if (S.rightTab === 'events' && S.view === folder.parentId) renderRight();
+}
+
 function startFolderDrag(folderId) {
   S.isDragging   = true;
   S.dragType     = 'folder';
@@ -815,12 +893,12 @@ document.addEventListener('mousemove', e => {
     $('trash-drop').classList.toggle('drag-over', overTrash);
     $('trash-label').textContent = overTrash ? tf('msg.deleteMsgsN', S.selSet.size) : t('left.trash');
   } else if (S.dragType === 'folder') {
-    _dragFolderRects.forEach(({ el, fid, rect: r }) => {
-      if (fid === '__unc__' || fid === S.dragFolderId) { el.classList.remove('drag-over'); return; }
-      const target = S.folders.find(f => f.id === fid);
-      if (target?.parentId) { el.classList.remove('drag-over'); return; }
-      const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-      el.classList.toggle('drag-over', over);
+    const drop = folderDropTarget(e.clientX, e.clientY);
+    _dragFolderRects.forEach(({ el }) => {
+      const mode = drop?.el === el ? drop.mode : null;
+      el.classList.toggle('drag-over',   mode === 'inside');
+      el.classList.toggle('drop-before', mode === 'before');
+      el.classList.toggle('drop-after',  mode === 'after');
     });
   } else if (S.dragType === 'song') {
     if (!_songDragRaf) {
@@ -869,35 +947,17 @@ document.addEventListener('mouseup', e => {
 
   $('trash-drop').classList.remove('drag-over');
   $('trash-label').textContent = t('left.trash');
-  document.querySelectorAll('.folder-item').forEach(el => el.classList.remove('drag-over'));
+  document.querySelectorAll('.folder-item').forEach(el => el.classList.remove('drag-over', 'drop-before', 'drop-after'));
 
   if (S.dragType === 'folder') {
-    let target = null;
-    document.querySelectorAll('.folder-item[data-folder-id]').forEach(el => {
-      const fid = el.dataset.folderId;
-      if (fid === '__unc__' || fid === S.dragFolderId) return;
-      const tf = S.folders.find(f => f.id === fid);
-      if (tf?.parentId) return;
-      const r = el.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-        target = fid;
-      }
-    });
-    if (target) {
-      const dragged = S.folders.find(f => f.id === S.dragFolderId);
-      if (dragged) {
-        let p = target;
-        let hasCycle = false;
-        while (p) {
-          if (p === dragged.id) { hasCycle = true; break; }
-          p = S.folders.find(f => f.id === p)?.parentId || null;
-        }
-        if (!hasCycle) {
-          dragged.parentId = target;
-          renderFolders();
-          save();
-        }
-      }
+    snapshotFolderRects();
+    const drop = folderDropTarget(e.clientX, e.clientY);
+    const dragged = S.folders.find(f => f.id === S.dragFolderId);
+    if (drop && dragged) {
+      const oldParent = dragged.parentId || null;
+      if (drop.mode === 'inside') dragged.parentId = drop.target.id;
+      else placeFolder(dragged, drop.target, drop.mode);
+      afterFolderMove(oldParent, dragged.parentId || null);
     }
     S.dragFolderId = null;
     S.dragType = 'msg';
@@ -1329,6 +1389,10 @@ function showFolderMenu(e, folderId) {
   $('menu-item-ren').style.display  = isUnc ? 'none' : 'flex';
   $('menu-item-icon').style.display = isChild ? 'flex' : 'none';
   $('menu-item-div').style.display  = isUnc ? 'none' : 'block';
+  const siblings = folder ? folderSiblings(folder.parentId || null, null) : [];
+  const pos = siblings.indexOf(folder);
+  $('menu-item-up').style.display   = isUnc || pos <= 0 ? 'none' : 'flex';
+  $('menu-item-down').style.display = isUnc || pos < 0 || pos >= siblings.length - 1 ? 'none' : 'flex';
   $('menu-item-del').style.display  = isUnc ? 'none' : 'flex';
 
   menu.style.visibility = 'hidden';
@@ -1364,6 +1428,15 @@ $('menu-item-ren').addEventListener('click', () => {
       if (val?.trim()) { folder.name = val.trim(); renderFolders(); renderRight(); save(); }
     }
   });
+});
+
+$('menu-item-up').addEventListener('click', () => {
+  const folder = S.folders.find(f => f.id === activeFolderIdForMenu);
+  if (folder) moveFolderBy(folder, -1);
+});
+$('menu-item-down').addEventListener('click', () => {
+  const folder = S.folders.find(f => f.id === activeFolderIdForMenu);
+  if (folder) moveFolderBy(folder, 1);
 });
 
 /* ── Icon Picker ── */
@@ -1488,10 +1561,9 @@ $('menu-item-exp').addEventListener('click', async () => {
       if (!selectedResult || selectedResult.ids.length === 0) return;
       separateExport = selectedResult.separate;
 
-      // 匯出順序一律依建立時間由舊到新（時間軸正確），不受側欄排序方向 S.folderSort 影響
-      const selectedFolders = [folder, ...children]
-        .filter(f => selectedResult.ids.includes(f.id))
-        .sort((a, b) => a.createdAt - b.createdAt);
+      // 匯出順序：母資料夾在前，子資料夾依排序鍵由小到大（即 ▲ 時的側欄順序），不受目前排序方向影響
+      const selectedFolders = [folder, ...[...children].sort((a, b) => a.createdAt - b.createdAt)]
+        .filter(f => selectedResult.ids.includes(f.id));
       folderExports = await Promise.all(selectedFolders.map(async f => ({
         name: f.name,
         msgs: await getOrderedFolderMessages(f)

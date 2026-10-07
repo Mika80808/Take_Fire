@@ -234,6 +234,9 @@ body {
   outline-offset: -2px;
   color: var(--c-primary);
 }
+/* 拖曳排序：落點在上緣／下緣時畫一條插入線 */
+.folder-item.drop-before { box-shadow: inset 0 2px 0 var(--c-button); }
+.folder-item.drop-after  { box-shadow: inset 0 -2px 0 var(--c-button); }
 
 .folder-icon { font-size: 15px; flex-shrink: 0; opacity: 0.8; display: flex; align-items: center; justify-content: center; }
 .active .folder-icon { opacity: 1; }
