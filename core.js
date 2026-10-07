@@ -959,6 +959,8 @@ const I18N = {
     'modal.delete': '刪除',
     'menu.rename': '重新命名',
     'menu.icon': '更改圖示',
+    'menu.moveUp': '上移',
+    'menu.moveDown': '下移',
     'menu.exportTxt': '匯出 TXT',
     'menu.deleteFolder': '刪除資料夾',
     'iconPicker.title': '更改子資料夾圖示',
@@ -1222,6 +1224,8 @@ const I18N = {
     'modal.delete': 'Delete',
     'menu.rename': 'Rename',
     'menu.icon': 'Change icon',
+    'menu.moveUp': 'Move up',
+    'menu.moveDown': 'Move down',
     'menu.exportTxt': 'Export TXT',
     'menu.deleteFolder': 'Delete folder',
     'iconPicker.title': 'Change subfolder icon',
@@ -1733,6 +1737,15 @@ function load() {
         date: '', endDate: '', cat: 'life', ...n
       }));
       return { parentId: null, createdAt: Date.now() + i, ...f, notes: upgradedNotes };
+    });
+    // 側欄只顯示兩層。舊版允許把有子資料夾的資料夾再放進別的資料夾，形成第三層而從側欄消失；
+    // 母資料夾已不存在的也一樣看不到。載入時把它們接回最上層的祖先，或升為最上層。
+    const folderById = new Map(S.folders.map(f => [f.id, f]));
+    S.folders.forEach(f => {
+      const seen = new Set([f.id]);
+      let p = f.parentId ? folderById.get(f.parentId) : null;
+      while (p?.parentId && !seen.has(p.id)) { seen.add(p.id); p = folderById.get(p.parentId); }
+      f.parentId = p && !p.parentId && p.id !== f.id ? p.id : null;
     });
     S.nameOrder   = d.nameOrder   || [];
     S.folderSort  = d.folderSort  || 'desc';
