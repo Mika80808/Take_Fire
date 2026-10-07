@@ -2855,8 +2855,8 @@ async function setActiveBackground(record) {
   if (record) {
     setAssetUrl('bgImage', record.blob);
     S.bgActiveId = record.id;
-    // 套用中的背景同步寫回 app_assets.bgImage，開機載入路徑（loadAllAssets）維持不變
-    idbPutAsset('bgImage', record.blob).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
+    // 開機時依 bgActiveId 從圖庫讀取（loadActiveBackground），不再另存副本；順手清掉舊版留下的那份
+    idbDelete('app_assets', 'bgImage').catch(err => console.warn('IDB asset delete:', err));
   } else {
     if (_assetUrlCache.has('bgImage')) {
       URL.revokeObjectURL(_assetUrlCache.get('bgImage'));
@@ -2937,6 +2937,7 @@ async function openBgPicker() {
         await idbPutBackground(migrated);
         S.bgActiveId = migrated.id;
         save();
+        idbDelete('app_assets', 'bgImage').catch(err => console.warn('IDB asset delete:', err));
         records = [migrated];
       }
     } catch (e) { console.warn('bg migrate:', e); }
@@ -2963,14 +2964,18 @@ $('avatar-player-name').addEventListener('click', e => {
   renameRoleLabel('player');
 });
 
-function handleImageUpload(e, stateKey, callback) {
+// 頭像只以小圓圖顯示，但每則訊息都會引用；長邊縮到 512px，避免原圖拖慢長對話捲動與撐大備份
+const AVATAR_MAX_EDGE = 512;
+
+async function handleImageUpload(e, stateKey, callback) {
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
-  setAssetUrl(stateKey, file);
-  idbPutAsset(stateKey, file).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
+  const stored = await compressImage(file, AVATAR_MAX_EDGE);
+  setAssetUrl(stateKey, stored);
+  idbPutAsset(stateKey, stored).catch(err => { console.warn('IDB asset write:', err); notifyStorageError(err, 'media'); });
   callback();
   save();
-  e.target.value = '';
 }
 
 $('avatar-char-input').addEventListener('change', e => handleImageUpload(e, 'avatarChar', () => { updateAvatarSlotUI(); renderMsgs(); }));
