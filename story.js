@@ -665,6 +665,7 @@ function applySelectionDOM() {
       el.classList.add(id === S.selAnchor ? 'sel-anchor' : 'sel-range');
     }
   });
+  updateSelActionBar();
 }
 
 function clearSel() {
@@ -677,7 +678,92 @@ function clearSel() {
       el.classList.remove('sel-anchor', 'sel-range');
     });
   }
+  updateSelActionBar();
 }
+
+// 觸控裝置無法拖曳訊息（資料夾也收在抽屜裡，拖了也沒有落點），
+// 改在選取後於底部顯示操作列；是否顯示由 CSS 的 (hover: none) 決定
+function updateSelActionBar() {
+  const n = S.selSet.size;
+  document.body.classList.toggle('has-selection', n > 0);
+  if (n > 0) $('sel-action-count').textContent = tf('sel.count', n);
+}
+
+function folderPickerHtml() {
+  const sorted = list => list.sort((a, b) => S.folderSort === 'desc' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt);
+  const btn = (id, name, isChild) =>
+    `<button type="button" class="folder-pick${isChild ? ' child' : ''}${id === (S.view ?? '__unc__') ? ' current' : ''}" data-folder-id="${escAttr(id)}">${esc(name)}</button>`;
+  let html = btn('__unc__', t('folder.uncategorized'), false);
+  sorted(S.folders.filter(f => !f.parentId)).forEach(f => {
+    html += btn(f.id, f.name, false);
+    sorted(S.folders.filter(c => c.parentId === f.id)).forEach(c => { html += btn(c.id, c.name, true); });
+  });
+  return `<div class="folder-pick-list">${html}</div>`;
+}
+
+// 點選清單中的資料夾即執行 onPick(id)，不需要確認鍵
+function showFolderPicker(title, html, onPick) {
+  const restore = () => { $('modal-confirm').style.display = ''; };
+  showModal({
+    title,
+    customHtml: html,
+    onOpen: body => {
+      $('modal-confirm').style.display = 'none';
+      body.querySelectorAll('.folder-pick').forEach(el => el.addEventListener('click', () => {
+        $('modal-overlay').style.display = 'none';
+        modalConfirmCallback = null;
+        modalCancelCallback = null;
+        restore();
+        onPick(el.dataset.folderId);
+      }));
+    },
+    onCancel: restore
+  });
+}
+
+function openMoveSelPicker() {
+  if (!S.selSet.size) return;
+  showFolderPicker(tf('sel.moveTitle', S.selSet.size), folderPickerHtml(), id => {
+    if (id === '__unc__') moveSelToUnclassified();
+    else dropIntoFolder(id);
+  });
+}
+
+// 資料夾選單「移到…」：觸控裝置不能拖曳資料夾，改用清單選擇要放進哪個母資料夾，或移回最上層。
+// 只有兩層，所以本身有子資料夾的不能被放進去，候選也只列最上層資料夾。
+const canNestFolder = folder => !S.folders.some(f => f.parentId === folder.id);
+
+function nestTargets(folder) {
+  return S.folders
+    .filter(f => !f.parentId && f.id !== folder.id && f.id !== folder.parentId)
+    .sort((a, b) => S.folderSort === 'desc' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt);
+}
+
+function openNestPicker(folder) {
+  const pick = (id, label) => `<button type="button" class="folder-pick" data-folder-id="${escAttr(id)}">${esc(label)}</button>`;
+  let html = folder.parentId ? pick('__top__', t('menu.toTopLevel')) : '';
+  if (canNestFolder(folder)) nestTargets(folder).forEach(f => { html += pick(f.id, f.name); });
+  showFolderPicker(tf('menu.nestTitle', folder.name), `<div class="folder-pick-list">${html}</div>`, id => {
+    const oldParent = folder.parentId || null;
+    folder.parentId = id === '__top__' ? null : id;
+    renderFolders();
+    save();
+    // 母資料夾的訊息與事件包含子資料夾的，正在看受影響的母資料夾就重載
+    if (S.view && (S.view === oldParent || S.view === folder.parentId)) {
+      renderMsgs();
+      if (S.rightTab === 'events') renderRight();
+    }
+  });
+}
+
+$('menu-item-nest').addEventListener('click', () => {
+  const folder = S.folders.find(f => f.id === activeFolderIdForMenu);
+  if (folder) openNestPicker(folder);
+});
+
+$('sel-action-move').addEventListener('click', openMoveSelPicker);
+$('sel-action-del').addEventListener('click', () => { if (S.selSet.size) confirmDelete(); });
+$('sel-action-clear').addEventListener('click', clearSel);
 
 /* ══════════════════════════════════════════════════════════
    Drag
@@ -979,24 +1065,25 @@ document.addEventListener('mouseup', e => {
   });
 
   if (target) {
-    if (target === '__unc__') {
-      // 計算「目前有分類」的訊息數 — 這些訊息將被移回未歸類，故未歸類計數要 +restoredCount
-      // 注意：必須在 mutation 之前計算，否則 some() 會找不到分類
-      const restoredCount = [...S.selSet].filter(id => {
-        return S.folders.some(f => f.msgIds.includes(id));
-      }).length;
-      S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
-      clearSel();
-      renderFolders();
-      renderMsgs();
-      renderRight();
-      adjustUnclassifiedCount(restoredCount);
-      save();
-    } else {
-      dropIntoFolder(target);
-    }
+    if (target === '__unc__') moveSelToUnclassified();
+    else dropIntoFolder(target);
   }
 });
+
+function moveSelToUnclassified() {
+  // 計算「目前有分類」的訊息數 — 這些訊息將被移回未歸類，故未歸類計數要 +restoredCount
+  // 注意：必須在 mutation 之前計算，否則 some() 會找不到分類
+  const restoredCount = [...S.selSet].filter(id => {
+    return S.folders.some(f => f.msgIds.includes(id));
+  }).length;
+  S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
+  clearSel();
+  renderFolders();
+  renderMsgs();
+  renderRight();
+  adjustUnclassifiedCount(restoredCount);
+  save();
+}
 
 function dropIntoFolder(folderId) {
   const folder = S.folders.find(f => f.id === folderId);
@@ -1394,6 +1481,10 @@ function showFolderMenu(e, folderId) {
   $('menu-item-up').style.display   = isUnc || pos <= 0 ? 'none' : 'flex';
   $('menu-item-down').style.display = isUnc || pos < 0 || pos >= siblings.length - 1 ? 'none' : 'flex';
   $('menu-item-del').style.display  = isUnc ? 'none' : 'flex';
+
+  // 「移到…」：子資料夾一定可以移回最上層；最上層的則要沒有子資料夾、且有別的資料夾可放
+  $('menu-item-nest').style.display =
+    !isUnc && folder && (folder.parentId || (canNestFolder(folder) && nestTargets(folder).length)) ? 'flex' : 'none';
 
   menu.style.visibility = 'hidden';
   menu.style.display = 'flex';
