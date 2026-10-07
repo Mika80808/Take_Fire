@@ -10,12 +10,14 @@ const GUIDE_PAD = 6;          // 高亮框比目標外擴的距離
 const GUIDE_GAP = 14;         // 說明卡與高亮框的間距
 const GUIDE_DRAWER_MS = 320;  // 等抽屜滑入定位後再量位置
 
-// target 可以是選擇器或回傳元素的函式；desktopOnly 的步驟在手機上略過（手機無法拖曳訊息）
+// target 可以是選擇器或回傳元素的函式。touch 是觸控裝置改用的版本：
+// 觸控無法拖曳訊息，改介紹選取後出現在底部的操作列
 const GUIDE_STEPS = [
   { target: () => document.querySelector('#message-list .msg-row') || $('message-list'), drawer: null, key: 'select' },
   { target: '#message-list',    drawer: null,    key: 'range' },
-  { target: '#trash-drop',      drawer: 'left',  key: 'trash', desktopOnly: true },
-  { target: '#folder-list',     drawer: 'left',  key: 'folders' },
+  { target: '#trash-drop',      drawer: 'left',  key: 'trash',
+    touch: { target: '#message-list', drawer: null, key: 'selActions' } },
+  { target: '#folder-list',     drawer: 'left',  key: 'folders', touch: { key: 'foldersTouch' } },
   { target: '#sort-folder-btn', drawer: 'left',  key: 'sort' },
   { target: '#col-right',       drawer: 'right', key: 'events',
     before: () => { if (S.rightTab !== 'events') switchRightTab('events'); } },
@@ -71,7 +73,8 @@ function buildGuideEls() {
 function startGuide() {
   if (_guideEls) return;
   if (document.body.classList.contains('site-mode')) switchMode('story');
-  _guideSteps = GUIDE_STEPS.filter(step => !(step.desktopOnly && guideIsMobile()));
+  const isTouch = window.matchMedia('(hover: none)').matches;
+  _guideSteps = GUIDE_STEPS.map(step => (isTouch && step.touch) ? { ...step, ...step.touch } : step);
   _guideEls = buildGuideEls();
   document.addEventListener('keydown', onGuideKey, true);
   window.addEventListener('resize', positionGuide);
