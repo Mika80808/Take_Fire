@@ -158,7 +158,7 @@ function setAssetUrl(key, blob) {
 
 // 回傳實際載入成功的 key 陣列，讓 boot 判斷是否需要補刷 UI
 async function loadAllAssets() {
-  const keys = ['avatarChar', 'avatarPlayer', 'bgImage'];
+  const keys = ['avatarChar', 'avatarPlayer'];
   const loaded = [];
   await Promise.all(keys.map(async key => {
     try {
@@ -168,7 +168,29 @@ async function loadAllAssets() {
       console.warn('loadAllAssets:', key, e);
     }
   }));
+  try {
+    if (await loadActiveBackground()) loaded.push('bgImage');
+  } catch (e) {
+    console.warn('loadAllAssets: bgImage', e);
+  }
   return loaded;
+}
+
+// 套用中的背景直接從圖庫（backgrounds store）以 S.bgActiveId 讀取。
+// 舊版另在 app_assets.bgImage 存了一份副本：圖庫裡讀得到時就刪掉它，
+// 讀不到（尚未遷移進圖庫的舊資料）才退回用它。
+async function loadActiveBackground() {
+  if (S.bgActiveId) {
+    const rec = await idbGet('backgrounds', S.bgActiveId);
+    if (rec?.blob instanceof Blob) {
+      setAssetUrl('bgImage', rec.blob);
+      idbDelete('app_assets', 'bgImage').catch(() => {});
+      return true;
+    }
+  }
+  const legacy = await idbGetAsset('bgImage');
+  if (legacy?.blob instanceof Blob) { setAssetUrl('bgImage', legacy.blob); return true; }
+  return false;
 }
 
 /* ── Background Gallery IDB helpers（多張背景圖庫，record: { id, blob, name, ts }） ── */
@@ -394,42 +416,154 @@ async function loadAllMemberPhotos() {
   } catch(e) { console.warn('loadAllMemberPhotos:', e); }
 }
 
-async function blobToBase64(blob) {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode.apply(null, chunk);
+/* ── 備份檔格式（zip） ──
+   備份存成 zip：manifest.json 放文字資料與每筆紀錄，圖片與 MP3 以原始二進位另存成檔案。
+   舊版把媒體轉 base64 塞進單一 JSON，檔案大三分之一，匯出匯入時還得在記憶體裡組出
+   一條巨大字串，MP3 一多手機分頁就會撐不住。媒體本身已是壓縮格式，zip 只打包不壓縮
+   （STORE），讀取時可直接切出檔案片段，不必整包載入記憶體。舊的 .json 備份仍可匯入。 */
+const BACKUP_MANIFEST = 'manifest.json';
+const ZIP_MAX_U32 = 0xFFFFFFFF;
+const ZIP_MAX_ENTRIES = 0xFFFF;
+
+const _crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
   }
-  return btoa(binary);
+  return table;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = _crcTable[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-async function exportStoreRecords(storeName) {
-  const db = await openDB();
-  const records = await new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = e => reject(e.target.error);
-  });
-  const out = [];
-  for (const rec of records) {
-    if (rec?.blob instanceof Blob) {
-      out.push({
-        ...rec,
-        blob: {
-          type: rec.blob.type || 'application/octet-stream',
-          size: rec.blob.size,
-          base64: await blobToBase64(rec.blob)
-        }
-      });
-    } else {
-      out.push(rec);
-    }
+// entries: [{ name, blob }] → zip Blob。Blob 片段直接當 parts，不複製進記憶體；
+// 只為了算 CRC 逐檔讀一次。不支援 zip64，總量超過 4GB 或檔案數超過 65535 會丟錯。
+async function buildZip(entries) {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  if (entries.length > ZIP_MAX_ENTRIES) throw new Error(t('imp.zipTooLarge'));
+
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const { name, blob } of entries) {
+    const nameBytes = enc.encode(name);
+    const size = blob.size;
+    if (offset + 30 + nameBytes.length + size > ZIP_MAX_U32) throw new Error(t('imp.zipTooLarge'));
+    const crc = crc32(new Uint8Array(await blob.arrayBuffer()));
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true);   // local file header
+    h.setUint16(4, 20, true);           // version needed
+    h.setUint16(6, 0x0800, true);       // 檔名為 UTF-8
+    h.setUint16(8, 0, true);            // STORE
+    h.setUint16(10, dosTime, true);
+    h.setUint16(12, dosDate, true);
+    h.setUint32(14, crc, true);
+    h.setUint32(18, size, true);
+    h.setUint32(22, size, true);
+    h.setUint16(26, nameBytes.length, true);
+    parts.push(h.buffer, nameBytes, blob);
+    central.push({ nameBytes, crc, size, offset });
+    offset += 30 + nameBytes.length + size;
   }
-  return out;
+
+  const cdStart = offset;
+  for (const e of central) {
+    const h = new DataView(new ArrayBuffer(46));
+    h.setUint32(0, 0x02014b50, true);   // central directory header
+    h.setUint16(4, 20, true);           // version made by
+    h.setUint16(6, 20, true);           // version needed
+    h.setUint16(8, 0x0800, true);
+    h.setUint16(10, 0, true);
+    h.setUint16(12, dosTime, true);
+    h.setUint16(14, dosDate, true);
+    h.setUint32(16, e.crc, true);
+    h.setUint32(20, e.size, true);
+    h.setUint32(24, e.size, true);
+    h.setUint16(28, e.nameBytes.length, true);
+    h.setUint32(42, e.offset, true);
+    parts.push(h.buffer, e.nameBytes);
+    offset += 46 + e.nameBytes.length;
+  }
+  if (offset > ZIP_MAX_U32) throw new Error(t('imp.zipTooLarge'));
+
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);   // end of central directory
+  end.setUint16(8, central.length, true);
+  end.setUint16(10, central.length, true);
+  end.setUint32(12, offset - cdStart, true);
+  end.setUint32(16, cdStart, true);
+  parts.push(end.buffer);
+  return new Blob(parts, { type: 'application/zip' });
+}
+
+// 讀取 zip 目錄，回傳 (name, type) → Blob 的取檔函式。取出的是原檔的切片，
+// 寫進 IDB 時才由瀏覽器實際讀取，不會整包載入記憶體。只支援本程式寫出的 STORE 格式。
+async function openZip(file) {
+  const fail = detail => new Error(`${t('msg.parseFail')} (${detail})`);
+  const tailLen = Math.min(file.size, 22 + 0xFFFF);
+  const tailBuf = await file.slice(file.size - tailLen).arrayBuffer();
+  const tail = new DataView(tailBuf);
+  let eocd = -1;
+  for (let i = tailLen - 22; i >= 0; i--) {
+    if (tail.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw fail('zip end record not found');
+  const count    = tail.getUint16(eocd + 10, true);
+  const cdSize   = tail.getUint32(eocd + 12, true);
+  const cdOffset = tail.getUint32(eocd + 16, true);
+  const cdBuf = await file.slice(cdOffset, cdOffset + cdSize).arrayBuffer();
+  const cd = new DataView(cdBuf);
+  const dec = new TextDecoder();
+  const entries = new Map();
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    if (p + 46 > cdSize || cd.getUint32(p, true) !== 0x02014b50) throw fail('bad zip directory');
+    const nameLen = cd.getUint16(p + 28, true);
+    const name = dec.decode(new Uint8Array(cdBuf, p + 46, nameLen));
+    entries.set(name, {
+      method     : cd.getUint16(p + 10, true),
+      size       : cd.getUint32(p + 20, true),
+      localOffset: cd.getUint32(p + 42, true)
+    });
+    p += 46 + nameLen + cd.getUint16(p + 30, true) + cd.getUint16(p + 32, true);
+  }
+
+  return async (name, type = '') => {
+    const e = entries.get(name);
+    if (!e) throw fail(`missing ${name}`);
+    // 解壓縮後用其他工具重新壓縮過的 zip 會是 DEFLATE，這裡不支援
+    if (e.method !== 0) throw new Error(t('imp.zipCompressed'));
+    const h = new DataView(await file.slice(e.localOffset, e.localOffset + 30).arrayBuffer());
+    if (h.getUint32(0, true) !== 0x04034b50) throw fail(`bad entry ${name}`);
+    const start = e.localOffset + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+    return file.slice(start, start + e.size, type);
+  };
+}
+
+async function isZipFile(file) {
+  if (file.size < 4) return false;
+  const sig = new DataView(await file.slice(0, 4).arrayBuffer()).getUint32(0, true);
+  return sig === 0x04034b50;
+}
+
+const MEDIA_EXT = {
+  'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+  'image/svg+xml': 'svg', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3'
+};
+
+function base64ToBlob(base64, type) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+  return new Blob([bytes], { type: type || 'application/octet-stream' });
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -521,13 +655,22 @@ function snoozeBackupReminder() {
 
 async function exportAllData() {
   saveNow();
+  // 紀錄裡的 Blob 換成 { file, type, size } 指向 zip 內的媒體檔
   const idb = {};
+  const media = [];
   for (const name of IMPORT_STORES) {
-    idb[name] = await exportStoreRecords(name);
+    const records = await idbGetAll(name);
+    idb[name] = records.map((rec, i) => {
+      if (!(rec?.blob instanceof Blob)) return rec;
+      const type = rec.blob.type || 'application/octet-stream';
+      const file = `media/${name}/${i}.${MEDIA_EXT[type] || 'bin'}`;
+      media.push({ name: file, blob: rec.blob });
+      return { ...rec, blob: { file, type, size: rec.blob.size } };
+    });
   }
   const payload = {
     app: 'take_fire',
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     localStorage: {
       tak_fire_v2: lsGet('tak_fire_v2'),
@@ -538,9 +681,9 @@ async function exportAllData() {
   };
   const _d = new Date();
   const stamp = `${toDateStr(_d)}_${String(_d.getHours()).padStart(2,'0')}-${String(_d.getMinutes()).padStart(2,'0')}`;
-  const fileName = `take_fire_backup_${stamp}.json`;
-  const json = JSON.stringify(payload);
-  const blob = new Blob([json], { type: 'application/json' });
+  const fileName = `take_fire_backup_${stamp}.zip`;
+  const manifest = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+  const blob = await buildZip([{ name: BACKUP_MANIFEST, blob: manifest }, ...media]);
 
   const fallbackDownload = () => {
     const url = URL.createObjectURL(blob);
@@ -565,7 +708,7 @@ async function exportAllData() {
     try {
       handle = await window.showSaveFilePicker({
         suggestedName: fileName,
-        types: [{ description: t('backupDesc'), accept: { 'application/json': ['.json'] } }]
+        types: [{ description: t('backupDesc'), accept: { 'application/zip': ['.zip'] } }]
       });
     } catch (e) {
       if (e.name === 'AbortError') return; // 使用者取消
@@ -594,9 +737,55 @@ async function exportAllData() {
 
 const IMPORT_STORES = ['posters', 'song_covers', 'app_assets', 'song_mp3s', 'messages', 'backgrounds'];
 
-// 清空並以 idbData（exportStoreRecords 格式：blob 已轉 base64）還原指定的 IDB stores。
-// 供 importAllData 的正式匯入與失敗後的還原（rollback）共用，確保兩者行為一致。
-async function writeStoresFromRecords(idbData, stores) {
+// 把各 store 的紀錄整理成可直接寫入 IDB 的形式（媒體還原成 Blob）。
+// 舊 JSON 備份的媒體是 { base64 }，zip 備份是 { file }，由 resolveFile 從 zip 取出。
+// 一定要在清空任何資料「之前」跑完：有任何一筆壞掉就在這裡丟錯，現有資料完全不動。
+async function prepareStoreRecords(idbData, stores, resolveFile) {
+  const prepared = {};
+  for (const name of stores) {
+    const records = idbData[name] ?? [];
+    if (!Array.isArray(records)) throw new Error(`${t('msg.parseFail')} (${name})`);
+    const out = [];
+    for (const rec of records) {
+      const b = rec?.blob;
+      if (!b || b instanceof Blob || typeof b !== 'object') { out.push(rec); continue; }
+      try {
+        if (typeof b.base64 === 'string') {
+          out.push({ ...rec, blob: base64ToBlob(b.base64, b.type) });
+        } else if (typeof b.file === 'string' && resolveFile) {
+          const blob = await resolveFile(b.file, b.type || 'application/octet-stream');
+          if (typeof b.size === 'number' && blob.size !== b.size) throw new Error(`size mismatch: ${b.file}`);
+          out.push({ ...rec, blob });
+        } else {
+          out.push(rec);
+        }
+      } catch (e) {
+        throw new Error(`${t('msg.parseFail')} (${name}: ${e?.message || e})`);
+      }
+    }
+    prepared[name] = out;
+  }
+  return prepared;
+}
+
+// 匯入前的現況快照，供失敗時回滾。媒體複製成記憶體中的 Blob：
+// 回滾時原本的 IDB 紀錄已被清空，不能指望從 IDB 讀出的 Blob 參照在每個瀏覽器都還有效。
+async function snapshotStores(stores) {
+  const snap = {};
+  for (const name of stores) {
+    const records = await idbGetAll(name);
+    for (let i = 0; i < records.length; i++) {
+      const b = records[i]?.blob;
+      if (b instanceof Blob) records[i] = { ...records[i], blob: new Blob([await b.arrayBuffer()], { type: b.type }) };
+    }
+    snap[name] = records;
+  }
+  return snap;
+}
+
+// 清空並寫入已整理好的紀錄（prepareStoreRecords 或 snapshotStores 的輸出）。
+// 正式匯入與失敗後的回滾共用，確保兩者行為一致。
+async function writeStoresFromRecords(prepared, stores) {
   const db = await openDB();
 
   await new Promise((resolve, reject) => {
@@ -604,33 +793,14 @@ async function writeStoresFromRecords(idbData, stores) {
     stores.forEach(name => tx.objectStore(name).clear());
     tx.oncomplete = resolve;
     tx.onerror = e => reject(e.target.error);
+    tx.onabort = e => reject(e.target.error || new Error('tx aborted'));
   });
 
   for (const storeName of stores) {
-    const records = idbData[storeName];
-    if (!Array.isArray(records) || records.length === 0) continue;
-
-    // 先預處理（base64 → Blob）並驗證所有資料；任一筆失敗就整個 store 中止
-    let processed;
-    try {
-      processed = records.map(rec => {
-        if (rec?.blob && typeof rec.blob === 'object' && rec.blob.base64) {
-          const { type, base64 } = rec.blob;
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-          return { ...rec, blob: new Blob([bytes], { type: type || 'application/octet-stream' }) };
-        }
-        return rec;
-      });
-    } catch (e) {
-      console.error(`writeStoresFromRecords [${storeName}]: invalid base64, store skipped`, e);
-      continue;
-    }
-
+    const records = prepared[storeName] || [];
     const BATCH = 50;
-    for (let i = 0; i < processed.length; i += BATCH) {
-      const batch = processed.slice(i, i + BATCH);
+    for (let i = 0; i < records.length; i += BATCH) {
+      const batch = records.slice(i, i + BATCH);
       await new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
@@ -643,35 +813,50 @@ async function writeStoresFromRecords(idbData, stores) {
   }
 }
 
-async function importAllData(file) {
-  if (file && file.size === 0) {
-    throw new Error(t('msg.emptyFile'));
+async function readBackupPayload(file) {
+  if (await isZipFile(file)) {
+    const getFile = await openZip(file);
+    let payload;
+    try {
+      payload = JSON.parse(await (await getFile(BACKUP_MANIFEST)).text());
+    } catch (e) {
+      console.error('importAllData manifest parse failed:', e);
+      throw new Error(`${t('msg.parseFail')} (${e?.name || ''}: ${e?.message || e})`);
+    }
+    return { payload, resolveFile: getFile };
   }
-  let payload;
+  // 舊版 .json 備份
   try {
     let text = await file.text();
     // 去除 UTF-8 BOM（部分編輯器另存會加上，會讓 JSON.parse 在第一個字元失敗）
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    payload = JSON.parse(text);
+    return { payload: JSON.parse(text), resolveFile: null };
   } catch(e) {
     console.error('importAllData parse failed:', e);
     throw new Error(`${t('msg.parseFail')} (${e?.name || ''}: ${e?.message || e})`);
   }
+}
+
+async function importAllData(file) {
+  if (file && file.size === 0) {
+    throw new Error(t('msg.emptyFile'));
+  }
+  const { payload, resolveFile } = await readBackupPayload(file);
 
   if (payload?.app !== 'take_fire') {
     throw new Error(t('msg.notTakeFire'));
   }
 
+  // 先把備份內容全部整理、驗證完，才開始動現有資料
+  const prepared = await prepareStoreRecords(payload.idb || {}, IMPORT_STORES, resolveFile);
+
   const lsKeys = ['tak_fire_v2', 'tak_fire_v2_sys', 'tak_fire_site_v1'];
 
-  // 匯入前先備份目前的 localStorage 與 IDB 內容，若中途失敗就整批還原，
+  // 匯入前先備份目前的 localStorage 與 IDB 內容，若寫入中途失敗就整批還原，
   // 避免出現「部分 store 已被新資料覆蓋、部分還沒寫入」的半新半舊毀損狀態。
   const lsBackup = {};
   lsKeys.forEach(k => { lsBackup[k] = lsGet(k); });
-  const idbBackup = {};
-  for (const name of IMPORT_STORES) {
-    idbBackup[name] = await exportStoreRecords(name);
-  }
+  const idbBackup = await snapshotStores(IMPORT_STORES);
 
   try {
     // 1. 清空並寫回 localStorage
@@ -682,7 +867,7 @@ async function importAllData(file) {
     if (ls.tak_fire_site_v1) lsSet('tak_fire_site_v1', ls.tak_fire_site_v1);
 
     // 2. 清空並還原 IDB
-    await writeStoresFromRecords(payload.idb || {}, IMPORT_STORES);
+    await writeStoresFromRecords(prepared, IMPORT_STORES);
   } catch (e) {
     console.error('importAllData failed, rolling back to pre-import data:', e);
     try {
@@ -951,7 +1136,9 @@ const I18N = {
     'member.nameTip': '點擊編輯名稱',
     'member.roleTip': '點擊編輯職位',
     'member.bioTip': '點擊編輯簡介',
-    'backupDesc': 'JSON 備份檔',
+    'backupDesc': 'Take Fire 備份檔（zip）',
+    'imp.zipTooLarge': '資料總量超過 4GB，無法打包成單一備份檔。',
+    'imp.zipCompressed': '這個 zip 被其他工具重新壓縮過，無法直接匯入。請使用原本匯出的備份檔。',
     'msg.emptyFile': '備份檔是空的（0 bytes），可能是先前以「另存新檔」覆蓋既有檔案但寫入被擋下所造成。請改選另一份備份檔。',
   },
   'en': {
@@ -1199,7 +1386,9 @@ const I18N = {
     'member.nameTip': 'Click to edit name',
     'member.roleTip': 'Click to edit role',
     'member.bioTip': 'Click to edit bio',
-    'backupDesc': 'JSON backup file',
+    'backupDesc': 'Take Fire backup (zip)',
+    'imp.zipTooLarge': 'Total data exceeds 4GB and cannot be packed into a single backup file.',
+    'imp.zipCompressed': 'This zip was re-compressed by another tool and cannot be imported. Use the originally exported backup.',
     'msg.emptyFile': 'The backup file is empty (0 bytes). This usually means a previous “Save As” overwrote the file but the write was blocked. Pick a different backup.',
   }
 };

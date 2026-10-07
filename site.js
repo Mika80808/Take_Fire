@@ -336,6 +336,8 @@ function openPosterModal(posterId) {
 const IMG_MAX_EDGE  = 1600;
 const IMG_QUALITY   = 0.82;
 const IMG_SKIP_SIZE = 400 * 1024; // 小檔且不需縮邊就直接存原檔
+const COVER_MAX_EDGE        = 800;  // 封面最大只以方形卡片顯示
+const MEMBER_PHOTO_MAX_EDGE = 1200; // Profile 頁的直式大頭照
 
 async function compressImage(file, maxEdge = IMG_MAX_EDGE, quality = IMG_QUALITY) {
   // GIF（動畫）、SVG（向量）等格式不重壓，避免破壞內容
@@ -1215,15 +1217,18 @@ function renderMusicPage() {
 }
 
 $('music-cover-input').addEventListener('change', async e => {
-  const file = e.target.files[0];
-  if (!file || _pendingCoverSongId === null) return;
-  if (!String(file.type || '').startsWith('image/')) {
+  const rawFile = e.target.files[0];
+  if (!rawFile || _pendingCoverSongId === null) return;
+  if (!String(rawFile.type || '').startsWith('image/')) {
     e.target.value = '';
     _pendingCoverSongId = null;
     return;
   }
   const song = S.songs.find(s => s.id === _pendingCoverSongId);
   if (!song) { e.target.value = ''; _pendingCoverSongId = null; return; }
+  e.target.value = '';
+  _pendingCoverSongId = null;
+  const file = await compressImage(rawFile, COVER_MAX_EDGE);
   // 釋放舊的 objectURL
   revokeCoverUrl(song.id);
   // 建立新的 objectURL
@@ -1238,8 +1243,6 @@ $('music-cover-input').addEventListener('change', async e => {
   // 更新歌單編輯表單內的封面狀態文字（若正在編輯中），不再重新渲染整個列表以保留輸入內容
   const statusEl = document.getElementById(`cover-status-${song.id}`);
   if (statusEl) statusEl.textContent = t('song.uploadedCover');
-  e.target.value = '';
-  _pendingCoverSongId = null;
 });
 
 $('music-mp3-input').addEventListener('change', e => {
@@ -1601,8 +1604,9 @@ function renderAbout() {
       const inp = document.createElement('input');
       inp.type = 'file'; inp.accept = 'image/*';
       inp.onchange = async e => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const rawFile = e.target.files[0];
+        if (!rawFile) return;
+        const file = await compressImage(rawFile, MEMBER_PHOTO_MAX_EDGE);
         if (!SS.members[idx].id) SS.members[idx].id = uid();
         const key = `member_photo_${SS.members[idx].id}`;
         // 釋放舊的 objectURL
