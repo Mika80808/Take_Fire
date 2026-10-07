@@ -330,6 +330,14 @@
     <button id="btn-scroll-top" class="scroll-btn" title="回到頂部" data-i18n-title="mid.scrollTop" aria-label="回到頂部" data-i18n-aria="mid.scrollTop">▲</button>
     <button id="btn-scroll-bottom" class="scroll-btn" title="回到底部" data-i18n-title="mid.scrollBottom" aria-label="回到底部" data-i18n-aria="mid.scrollBottom">▼</button>
   </div>
+
+  <!-- 觸控裝置選取訊息後的操作列（無法拖曳時用來歸類／刪除） -->
+  <div id="sel-action-bar" role="toolbar">
+    <span id="sel-action-count"></span>
+    <button type="button" class="sel-action-btn" id="sel-action-move" data-i18n="sel.move">移到資料夾</button>
+    <button type="button" class="sel-action-btn danger" id="sel-action-del" data-i18n="sel.delete">刪除</button>
+    <button type="button" class="sel-action-close" id="sel-action-clear" aria-label="取消選取" data-i18n-aria="sel.clear">✕</button>
+  </div>
 </div>
 
 <!-- ── Right Column ────────────────────────────────────── -->
