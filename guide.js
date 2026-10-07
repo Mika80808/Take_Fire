@@ -10,7 +10,11 @@ const GUIDE_PAD = 6;          // 高亮框比目標外擴的距離
 const GUIDE_GAP = 14;         // 說明卡與高亮框的間距
 const GUIDE_DRAWER_MS = 320;  // 等抽屜滑入定位後再量位置
 
+// target 可以是選擇器或回傳元素的函式；desktopOnly 的步驟在手機上略過（手機無法拖曳訊息）
 const GUIDE_STEPS = [
+  { target: () => document.querySelector('#message-list .msg-row') || $('message-list'), drawer: null, key: 'select' },
+  { target: '#message-list',    drawer: null,    key: 'range' },
+  { target: '#trash-drop',      drawer: 'left',  key: 'trash', desktopOnly: true },
   { target: '#folder-list',     drawer: 'left',  key: 'folders' },
   { target: '#sort-folder-btn', drawer: 'left',  key: 'sort' },
   { target: '#col-right',       drawer: 'right', key: 'events',
@@ -19,6 +23,7 @@ const GUIDE_STEPS = [
 ];
 
 let _guideIdx = -1;
+let _guideSteps = [];
 let _guideEls = null;
 let _guideSeq = 0;
 
@@ -57,7 +62,7 @@ function buildGuideEls() {
   card.querySelector('#guide-skip').addEventListener('click', () => endGuide());
   card.querySelector('#guide-prev').addEventListener('click', () => showGuideStep(_guideIdx - 1));
   card.querySelector('#guide-next').addEventListener('click', () => {
-    if (_guideIdx >= GUIDE_STEPS.length - 1) endGuide();
+    if (_guideIdx >= _guideSteps.length - 1) endGuide();
     else showGuideStep(_guideIdx + 1);
   });
   return { blocker, spot, card };
@@ -66,6 +71,7 @@ function buildGuideEls() {
 function startGuide() {
   if (_guideEls) return;
   if (document.body.classList.contains('site-mode')) switchMode('story');
+  _guideSteps = GUIDE_STEPS.filter(step => !(step.desktopOnly && guideIsMobile()));
   _guideEls = buildGuideEls();
   document.addEventListener('keydown', onGuideKey, true);
   window.addEventListener('resize', positionGuide);
@@ -91,19 +97,19 @@ function onGuideKey(e) {
 }
 
 function showGuideStep(idx) {
-  if (!_guideEls || idx < 0 || idx >= GUIDE_STEPS.length) return;
+  if (!_guideEls || idx < 0 || idx >= _guideSteps.length) return;
   _guideIdx = idx;
-  const step = GUIDE_STEPS[idx];
+  const step = _guideSteps[idx];
   const seq = ++_guideSeq;
   step.before?.();
 
-  $('guide-step').textContent  = `${idx + 1} / ${GUIDE_STEPS.length}`;
+  $('guide-step').textContent  = `${idx + 1} / ${_guideSteps.length}`;
   $('guide-title').textContent = t(`guide.${step.key}.title`);
   $('guide-body').textContent  = t(`guide.${step.key}.body`);
   $('guide-skip').textContent  = t('guide.skip');
   $('guide-prev').textContent  = t('guide.prev');
   $('guide-prev').style.visibility = idx === 0 ? 'hidden' : '';
-  $('guide-next').textContent  = idx === GUIDE_STEPS.length - 1 ? t('guide.done') : t('guide.next');
+  $('guide-next').textContent  = idx === _guideSteps.length - 1 ? t('guide.done') : t('guide.next');
 
   // 手機版要先把抽屜拉出來，等它滑到定位才量得到正確位置
   let needsDrawer = false;
@@ -126,7 +132,8 @@ function positionGuide() {
   if (!_guideEls || _guideIdx < 0) return;
   const { spot, card } = _guideEls;
   const vw = window.innerWidth, vh = window.innerHeight;
-  const target = document.querySelector(GUIDE_STEPS[_guideIdx].target);
+  const sel = _guideSteps[_guideIdx].target;
+  const target = typeof sel === 'function' ? sel() : document.querySelector(sel);
   const r = target?.getBoundingClientRect();
 
   if (!r || (r.width === 0 && r.height === 0)) {
