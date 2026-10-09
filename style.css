@@ -33,6 +33,9 @@
   --c-primary        : #d4d4d4;
   --c-primary-rgb    : 180 180 200;
   --c-button         : #558bff;
+  /* 強調色的純色版：--c-button 在 cyberpunk 是漸層，只能當 background；
+     邊框、外框線、陰影、文字色要用這個，否則整條宣告失效、什麼都畫不出來 */
+  --c-accent         : #558bff;
   --c-primary-user   : #2a2a2a;
   --c-primary-char   : #1a1a1a;
 
@@ -237,8 +240,8 @@ body {
   color: var(--c-primary);
 }
 /* 拖曳排序：落點在上緣／下緣時畫一條插入線 */
-.folder-item.drop-before { box-shadow: inset 0 2px 0 var(--c-button); }
-.folder-item.drop-after  { box-shadow: inset 0 -2px 0 var(--c-button); }
+.folder-item.drop-before { box-shadow: inset 0 2px 0 var(--c-accent); }
+.folder-item.drop-after  { box-shadow: inset 0 -2px 0 var(--c-accent); }
 
 .folder-icon { font-size: 15px; flex-shrink: 0; opacity: 0.8; display: flex; align-items: center; justify-content: center; }
 .active .folder-icon { opacity: 1; }
@@ -1589,6 +1592,7 @@ body[data-theme="LoveSong"] {
   color-scheme: light;
   --c-primary: #bf7e81; --c-primary-rgb: 191 126 129;
   --c-button: #bf7e81;
+  --c-accent: #bf7e81;
   --c-primary-user: #ffe4e1; --c-primary-char: #ffffff;
   --c-bg: #fff9f8;      --c-bg-rgb: 255 249 248;
   --c-text: #4a3a3b;    --c-text-rgb: 74 58 59;
@@ -1602,6 +1606,7 @@ body[data-theme="WhiteNoise"] {
   color-scheme: light;
   --c-primary: #d97757; --c-primary-rgb: 217 119 87;
   --c-button: #d97757;
+  --c-accent: #d97757;
   --c-primary-user: #f3e9e2; --c-primary-char: #ffffff;
   --c-bg: #faf9f5;      --c-bg-rgb: 250 249 245;
   --c-text: #2b2a27;    --c-text-rgb: 43 42 39;
@@ -1616,6 +1621,7 @@ body[data-theme="cyberpunk"] {
   color-scheme: dark;
   --c-primary: #ad90ff; --c-primary-rgb: 230 230 250;
   --c-button: linear-gradient(135deg, #fda1f9 0%, #a65dff 100%);
+  --c-accent: #d07cff;
   --c-primary-user: #161218; --c-primary-char: #000000;
   --c-bg: #0d0812;      --c-bg-rgb: 13 8 18;
   --c-text: #ffffff;    --c-text-rgb: 238 229 242;
@@ -1824,7 +1830,7 @@ body.site-mode #col-right { display: none; }
   transition: background 0.2s;
 }
 .site-nav-item:hover { color: var(--c-text); }
-.site-nav-item.active { color: var(--c-button); }
+.site-nav-item.active { color: var(--c-accent); }
 .site-nav-item.active::after { background: var(--c-button); }
 body[data-theme="cyberpunk"] .site-nav-item.active { color: var(--c-primary); }
 body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-primary); }
@@ -1960,7 +1966,7 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
   padding: 11px 12px; color: var(--c-text); font-size: 13px;
   line-height: 1.7; font-family: inherit;
 }
-.cg-nb-text:focus { outline: none; border-color: var(--c-button); }
+.cg-nb-text:focus { outline: none; border-color: var(--c-accent); }
 .cg-nb-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 11px; color: var(--c-text-mute); }
 .cg-nb-copy {
   display: flex; align-items: center; gap: 5px;
@@ -2406,7 +2412,7 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
   cursor: pointer; padding: 4px 0; transition: color 0.2s;
   background: none; border: none; text-transform: uppercase; letter-spacing: 1px; font-family: inherit;
 }
-.music-upload-mp3:hover { color: var(--c-button); }
+.music-upload-mp3:hover { color: var(--c-accent); }
 
 /* Lyrics panel */
 .music-lyrics-panel {
@@ -2422,7 +2428,7 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
 }
 .music-lyrics-label {
   font-size: 11px; font-weight: 500; letter-spacing: 60px;
-  color: var(--c-button); text-transform: uppercase;
+  color: var(--c-accent); text-transform: uppercase;
   margin-bottom: 16px; flex-shrink: 0;
   display: flex; align-items: center; gap: 8px;
 }
@@ -2887,7 +2893,7 @@ body.mobile-right-open #mobile-right-btn {
   z-index: var(--z-backup-banner);
 }
 #backup-reminder.show { display: flex; }
-#backup-reminder svg { flex-shrink: 0; color: var(--c-button); }
+#backup-reminder svg { flex-shrink: 0; color: var(--c-accent); }
 #backup-reminder-text { flex: 1; min-width: 0; }
 #backup-reminder button {
   flex-shrink: 0;
@@ -2981,7 +2987,7 @@ body.mobile-right-open #mobile-right-btn {
 }
 #msg-search-input:focus {
   outline: none;
-  border-color: var(--c-button);
+  border-color: var(--c-accent);
 }
 .msg-search-scope {
   display: flex;
@@ -3056,7 +3062,7 @@ body.mobile-right-open #mobile-right-btn {
 
 /* 跳轉後短暫標示目標訊息 */
 .msg-bubble.msg-search-flash {
-  box-shadow: 0 0 0 3px var(--c-button);
+  box-shadow: 0 0 0 3px var(--c-accent);
   transition: box-shadow 0.4s;
 }
 
@@ -3176,7 +3182,7 @@ body.mobile-right-open #mobile-right-btn {
   position: fixed;
   z-index: var(--z-guide);
   border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 2px var(--c-button), 0 0 0 9999px rgb(0 0 0 / 0.6);
+  box-shadow: 0 0 0 2px var(--c-accent), 0 0 0 9999px rgb(0 0 0 / 0.6);
   pointer-events: none;
   transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
 }
