@@ -762,7 +762,7 @@ $('menu-item-nest').addEventListener('click', () => {
 });
 
 $('sel-action-move').addEventListener('click', openMoveSelPicker);
-$('sel-action-del').addEventListener('click', () => { if (S.selSet.size) confirmDelete(); });
+$('sel-action-del').addEventListener('click', () => confirmDelete($('sel-action-del')));
 $('sel-action-clear').addEventListener('click', clearSel);
 
 /* ══════════════════════════════════════════════════════════
@@ -1224,34 +1224,71 @@ function editMessage(msgId) {
   });
 }
 
-function confirmDelete() {
+// 刪除前的小確認框，貼在觸發位置（垃圾桶或手機操作列的刪除鍵）上方。
+// 預設焦點放在「取消」，誤按 Enter 也不會刪掉。
+let _delPopAnchor = null;
+
+function confirmDelete(anchorEl = $('trash-drop')) {
   const count = S.selSet.size;
-  showModal({
-    title: t('msg.confirmDelete'),
-    desc: tf('msg.deleteN', count),
-    confirmClass: 'btn-danger',
-    confirmText: t('modal.delete'),
-    onConfirm: () => {
-      const ids = [...S.selSet];
-      const cls = classifiedIds();
-      const wasUnclassified = ids.filter(id => !cls.has(id)).length;
-      idbDeleteMessages(ids).catch(err => console.warn('idbDeleteMessages:', err));
-      const idSet = new Set(ids);
-      S.allMessages = S.allMessages.filter(m => !idSet.has(m.id));
-      S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
-      // 直接從 DOM 移除，避免重繪導致捲動位置跳回頂部
-      const list = $('message-list');
-      ids.forEach(id => {
-        list.querySelector(`[data-id="${CSS.escape(id)}"]`)?.remove();
-      });
-      clearSel();
-      renderFolders();
-      renderRight();
-      adjustUnclassifiedCount(-wasUnclassified);
-      save();
-    }
-  });
+  if (!count) return;
+  _delPopAnchor = anchorEl;
+  $('trash-confirm-text').textContent = tf('trash.confirm', count);
+  const pop = $('trash-confirm');
+  pop.classList.add('open');
+  positionDeletePopover();
+  $('trash-confirm-cancel').focus();
 }
+
+function positionDeletePopover() {
+  const pop = $('trash-confirm');
+  if (!pop.classList.contains('open') || !_delPopAnchor) return;
+  const r = _delPopAnchor.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+  pop.style.left = `${left}px`;
+  pop.style.bottom = `${window.innerHeight - r.top + 10}px`;
+  // 小箭頭對準觸發元素的中央
+  pop.style.setProperty('--arrow-x', `${r.left + r.width / 2 - left}px`);
+}
+
+function closeDeletePopover() {
+  $('trash-confirm').classList.remove('open');
+  _delPopAnchor = null;
+}
+
+function deleteSelectedMessages() {
+  const ids = [...S.selSet];
+  const cls = classifiedIds();
+  const wasUnclassified = ids.filter(id => !cls.has(id)).length;
+  idbDeleteMessages(ids).catch(err => console.warn('idbDeleteMessages:', err));
+  const idSet = new Set(ids);
+  S.allMessages = S.allMessages.filter(m => !idSet.has(m.id));
+  S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
+  // 直接從 DOM 移除，避免重繪導致捲動位置跳回頂部
+  const list = $('message-list');
+  ids.forEach(id => {
+    list.querySelector(`[data-id="${CSS.escape(id)}"]`)?.remove();
+  });
+  clearSel();
+  renderFolders();
+  renderRight();
+  adjustUnclassifiedCount(-wasUnclassified);
+  save();
+}
+
+$('trash-confirm-cancel').addEventListener('click', closeDeletePopover);
+$('trash-confirm-ok').addEventListener('click', () => {
+  closeDeletePopover();
+  deleteSelectedMessages();
+});
+// 點確認框以外的地方、按 Esc 都視為取消
+document.addEventListener('pointerdown', e => {
+  if ($('trash-confirm').classList.contains('open') && !e.target.closest('#trash-confirm')) closeDeletePopover();
+}, true);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('trash-confirm').classList.contains('open')) { e.preventDefault(); closeDeletePopover(); }
+});
+window.addEventListener('resize', positionDeletePopover);
 
 /* ══════════════════════════════════════════════════════════
    Render — Folders

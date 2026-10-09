@@ -382,6 +382,15 @@
 <!-- ── Mobile Drawer Overlay ───────────────────────────── -->
 <div id="mobile-drawer-overlay"></div>
 
+<!-- ── 刪除訊息的小確認框（貼在垃圾桶／手機刪除鍵上方） ── -->
+<div id="trash-confirm" role="alertdialog" aria-labelledby="trash-confirm-text">
+  <div id="trash-confirm-text"></div>
+  <div class="trash-confirm-actions">
+    <button type="button" class="modal-btn btn-cancel" id="trash-confirm-cancel" data-i18n="modal.cancel">取消</button>
+    <button type="button" class="modal-btn btn-danger" id="trash-confirm-ok" data-i18n="modal.delete">刪除</button>
+  </div>
+</div>
+
 <!-- ── Modal ───────────────────────────────────────────── -->
 <div id="modal-overlay">
   <div class="modal-box" id="modal-box">

@@ -22,6 +22,7 @@
   --z-drag-ghost      : 9999;  /* 拖曳資料夾時跟著游標的殘影 */
   --z-modal           : 10000;
   --z-menu            : 10001; /* 內容選單需蓋過彈窗，故在其上 */
+  --z-trash-confirm   : 10002; /* 刪除訊息的小確認框，貼在垃圾桶上方 */
   --z-tour-modal      : 10010;
   --z-guide           : 10020; /* Story Mode 新手導覽，蓋過其他一切 */
 }
@@ -3214,4 +3215,41 @@ body.mobile-right-open #mobile-right-btn {
 .guide-skip:hover { color: var(--c-text); }
 @media (prefers-reduced-motion: reduce) {
   .guide-spot { transition: none; }
+}
+
+/* ── 刪除訊息的小確認框 ─────────────────────────────────── */
+#trash-confirm {
+  position: fixed;
+  z-index: var(--z-trash-confirm);
+  display: none;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  border: 1px solid rgb(var(--c-danger-rgb) / 0.5);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+#trash-confirm.open { display: block; animation: trashConfirmIn 0.15s ease-out; }
+/* 指向觸發元素的小箭頭 */
+#trash-confirm::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: calc(var(--arrow-x, 50%) - 6px);
+  width: 10px; height: 10px;
+  background: var(--c-bg);
+  border-right: 1px solid rgb(var(--c-danger-rgb) / 0.5);
+  border-bottom: 1px solid rgb(var(--c-danger-rgb) / 0.5);
+  transform: rotate(45deg);
+}
+.trash-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+@keyframes trashConfirmIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #trash-confirm.open { animation: none; }
 }
