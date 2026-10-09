@@ -900,7 +900,8 @@ function folderDropTarget(x, y) {
     mode = 'inside';
   }
   const becomesChild = mode === 'inside' || !!target.parentId;
-  if (becomesChild && folderHasChildren(dragged)) return null;
+  // 擋下時仍回傳落點，讓拖曳標籤可以說明原因
+  if (becomesChild && folderHasChildren(dragged)) return { el: hit.el, target, mode: null, blocked: true };
   return { el: hit.el, target, mode };
 }
 
@@ -934,6 +935,7 @@ function startFolderDrag(folderId) {
   const folder   = S.folders.find(f => f.id === folderId);
   const ghost    = $('drag-ghost');
   ghost.textContent = tf('msg.moveFolder', folder?.name || '');
+  ghost.dataset.blocked = 'false';
   ghost.style.display = 'block';
   ghost.style.left = (S.mx + 14) + 'px';
   ghost.style.top  = (S.my + 14) + 'px';
@@ -980,6 +982,13 @@ document.addEventListener('mousemove', e => {
     $('trash-label').textContent = overTrash ? tf('msg.deleteMsgsN', S.selSet.size) : t('left.trash');
   } else if (S.dragType === 'folder') {
     const drop = folderDropTarget(e.clientX, e.clientY);
+    const blocked = !!drop?.blocked;
+    if (ghost.dataset.blocked !== String(blocked)) {
+      ghost.dataset.blocked = String(blocked);
+      ghost.textContent = blocked
+        ? t('msg.folderHasChildren')
+        : tf('msg.moveFolder', S.folders.find(f => f.id === S.dragFolderId)?.name || '');
+    }
     _dragFolderRects.forEach(({ el }) => {
       const mode = drop?.el === el ? drop.mode : null;
       el.classList.toggle('drag-over',   mode === 'inside');
@@ -1039,7 +1048,7 @@ document.addEventListener('mouseup', e => {
     snapshotFolderRects();
     const drop = folderDropTarget(e.clientX, e.clientY);
     const dragged = S.folders.find(f => f.id === S.dragFolderId);
-    if (drop && dragged) {
+    if (drop && !drop.blocked && dragged) {
       const oldParent = dragged.parentId || null;
       if (drop.mode === 'inside') dragged.parentId = drop.target.id;
       else placeFolder(dragged, drop.target, drop.mode);
