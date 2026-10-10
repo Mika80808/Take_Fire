@@ -995,6 +995,11 @@ document.addEventListener('mousemove', e => {
       el.classList.toggle('drop-before', mode === 'before');
       el.classList.toggle('drop-after',  mode === 'after');
     });
+    const overTrash = isOverTrash(e.clientX, e.clientY);
+    $('trash-drop').classList.toggle('drag-over', overTrash);
+    $('trash-label').textContent = overTrash
+      ? tf('trash.deleteFolder', S.folders.find(f => f.id === S.dragFolderId)?.name || '')
+      : t('left.trash');
   } else if (S.dragType === 'song') {
     if (!_songDragRaf) {
       const { clientX, clientY } = e;
@@ -1048,7 +1053,9 @@ document.addEventListener('mouseup', e => {
     snapshotFolderRects();
     const drop = folderDropTarget(e.clientX, e.clientY);
     const dragged = S.folders.find(f => f.id === S.dragFolderId);
-    if (drop && !drop.blocked && dragged) {
+    if (dragged && isOverTrash(e.clientX, e.clientY)) {
+      confirmDeleteFolder(dragged, $('trash-drop'));
+    } else if (drop && !drop.blocked && dragged) {
       const oldParent = dragged.parentId || null;
       if (drop.mode === 'inside') dragged.parentId = drop.target.id;
       else placeFolder(dragged, drop.target, drop.mode);
@@ -1059,8 +1066,7 @@ document.addEventListener('mouseup', e => {
     return;
   }
 
-  const tr = $('trash-drop').getBoundingClientRect();
-  if (e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom) {
+  if (isOverTrash(e.clientX, e.clientY)) {
     confirmDelete();
     return;
   }
@@ -1227,16 +1233,33 @@ function editMessage(msgId) {
 // 刪除前的小確認框，貼在觸發位置（垃圾桶或手機操作列的刪除鍵）上方。
 // 預設焦點放在「取消」，誤按 Enter 也不會刪掉。
 let _delPopAnchor = null;
+let _delPopAction = null;
 
-function confirmDelete(anchorEl = $('trash-drop')) {
-  const count = S.selSet.size;
-  if (!count) return;
+function isOverTrash(x, y) {
+  const r = $('trash-drop').getBoundingClientRect();
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+function showDeletePopover(anchorEl, text, onConfirm) {
   _delPopAnchor = anchorEl;
-  $('trash-confirm-text').textContent = tf('trash.confirm', count);
+  _delPopAction = onConfirm;
+  $('trash-confirm-text').textContent = text;
   const pop = $('trash-confirm');
   pop.classList.add('open');
   positionDeletePopover();
   $('trash-confirm-cancel').focus();
+}
+
+function confirmDelete(anchorEl = $('trash-drop')) {
+  const count = S.selSet.size;
+  if (!count) return;
+  showDeletePopover(anchorEl, tf('trash.confirm', count), deleteSelectedMessages);
+}
+
+function confirmDeleteFolder(folder, anchorEl) {
+  const hasChildren = S.folders.some(f => f.parentId === folder.id);
+  const text = tf('trash.confirmFolder', folder.name) + (hasChildren ? t('trash.folderChildrenNote') : '');
+  showDeletePopover(anchorEl, text, () => deleteFolder(folder));
 }
 
 function positionDeletePopover() {
@@ -1254,6 +1277,7 @@ function positionDeletePopover() {
 function closeDeletePopover() {
   $('trash-confirm').classList.remove('open');
   _delPopAnchor = null;
+  _delPopAction = null;
 }
 
 function deleteSelectedMessages() {
@@ -1278,8 +1302,9 @@ function deleteSelectedMessages() {
 
 $('trash-confirm-cancel').addEventListener('click', closeDeletePopover);
 $('trash-confirm-ok').addEventListener('click', () => {
+  const action = _delPopAction;
   closeDeletePopover();
-  deleteSelectedMessages();
+  action?.();
 });
 // 點確認框以外的地方、按 Esc 都視為取消
 document.addEventListener('pointerdown', e => {
@@ -1768,16 +1793,18 @@ $('menu-item-del').addEventListener('click', () => {
     desc: tf('folder.deleteConfirm', folder.name),
     confirmClass: 'btn-danger',
     confirmText: t('modal.delete'),
-    onConfirm: () => {
-      S.folders.forEach(f => { if (f.parentId === folder.id) f.parentId = null; });
-      S.folders = S.folders.filter(f => f.id !== folder.id);
-      // 該資料夾自身的訊息回到未歸類（子資料夾僅升級為頂層，msgIds 不受影響）
-      adjustUnclassifiedCount(folder.msgIds.length);
-      if (S.view === folder.id) { switchView(null, t('folder.uncategorized')); save(); }
-      else { renderFolders(); renderRight(); save(); }
-    }
+    onConfirm: () => deleteFolder(folder)
   });
 });
+
+function deleteFolder(folder) {
+  S.folders.forEach(f => { if (f.parentId === folder.id) f.parentId = null; });
+  S.folders = S.folders.filter(f => f.id !== folder.id);
+  // 該資料夾自身的訊息回到未歸類（子資料夾僅升級為頂層，msgIds 不受影響）
+  adjustUnclassifiedCount(folder.msgIds.length);
+  if (S.view === folder.id) { switchView(null, t('folder.uncategorized')); save(); }
+  else { renderFolders(); renderRight(); save(); }
+}
 
 /* ══════════════════════════════════════════════════════════
    Jump To Event Helper
