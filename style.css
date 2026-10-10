@@ -2063,7 +2063,7 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
 
 /* 右側頂部 header bar */
 .ig-modal-header {
-  display: flex; align-items: center; justify-content: flex-end;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 14px 16px 12px;
   border-bottom: 1px solid rgb(var(--c-primary-rgb) / 0.08);
   flex-shrink: 0;
@@ -3253,3 +3253,33 @@ body.mobile-right-open #mobile-right-btn {
 @media (prefers-reduced-motion: reduce) {
   #trash-confirm.open { animation: none; }
 }
+
+/* ── Photo 排序 ─────────────────────────────────────────── */
+/* 拖曳中：來源照片變淡，落點一側畫一條插入線 */
+#poster-grid .poster-cell.dragging { opacity: 0.35; }
+#poster-grid .poster-cell.drop-before::before,
+#poster-grid .poster-cell.drop-after::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 4px;
+  background: var(--c-accent);
+  z-index: 6;
+}
+#poster-grid .poster-cell.drop-before::before { left: 0; }
+#poster-grid .poster-cell.drop-after::before  { right: 0; }
+body.poster-dragging, body.poster-dragging * { cursor: grabbing !important; }
+
+.ig-modal-move { display: flex; gap: 6px; }
+.ig-modal-move-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--c-primary-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-mute);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ig-modal-move-btn:hover:not(:disabled) { color: var(--c-text); border-color: var(--c-accent); }
+.ig-modal-move-btn:disabled { opacity: 0.35; cursor: default; }
