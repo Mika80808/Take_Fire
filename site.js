@@ -251,6 +251,15 @@ function buildPosterGrid(posters) {
   grid.appendChild(addCell);
 }
 
+// 舊版沒有記錄上傳時間：改用圖片檔本身的時間（壓縮過的圖片就是上傳當下），
+// 並寫回 IDB，之後匯出備份再匯入也不會遺失（匯入後的 Blob 不帶檔案時間）。
+function posterTs(rec) {
+  if (typeof rec.ts === 'number') return rec.ts;
+  const ts = typeof rec.blob.lastModified === 'number' ? rec.blob.lastModified : 0;
+  idbPutPoster({ ...rec, ts }).catch(err => console.warn('poster ts backfill:', err));
+  return ts;
+}
+
 async function renderPoster() {
   const grid = $('poster-grid');
   grid.innerHTML = `<div style="padding:40px;color:var(--c-hint);text-align:center;grid-column:1/-1">${esc(t('msg.loading'))}</div>`;
@@ -260,16 +269,20 @@ async function renderPoster() {
     idbGetAllPosters(),
   ]);
 
-  // 本機圖片：從 blob 建立 objectURL（跳過 blob 遺失的記錄）
+  // 本機圖片：從 blob 建立 objectURL（跳過 blob 遺失的記錄），依上傳時間 ts 由舊到新排。
+  // IDB 的 getAll 是照主鍵排，而主鍵是隨機 UUID，不排序的話每次重新整理順序都不一樣。
   const local = localRecords
     .filter(rec => rec.blob instanceof Blob)
-    .map(rec => ({
+    .map(rec => ({ rec, ts: posterTs(rec) }))
+    .sort((a, b) => a.ts - b.ts || (a.rec.id < b.rec.id ? -1 : 1))
+    .map(({ rec, ts }) => ({
       id      : rec.id,
       src     : getPosterObjectUrl(rec),
       label   : rec.label || '',
       title   : rec.title || '',
       caption : rec.caption || '',
       noteId  : rec.noteId || rec.folderId || '',
+      ts,
       isLocal : true,
     }));
 
@@ -389,8 +402,9 @@ $('pm-save').addEventListener('click', async () => {
     const id  = uid();
     const src = URL.createObjectURL(_pmFile);
     _posterUrlCache.set(id, src);
-    SS.posters.push({ id, src, title, caption, noteId, label: _pmFile.name, isLocal: true });
-    idbPutPoster({ id, blob: _pmFile, title, caption, noteId, label: _pmFile.name }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+    const ts  = Date.now();
+    SS.posters.push({ id, src, title, caption, noteId, label: _pmFile.name, ts, isLocal: true });
+    idbPutPoster({ id, blob: _pmFile, title, caption, noteId, label: _pmFile.name, ts }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
   } else {
     const idx = SS.posters.findIndex(p => p.id === _pmPosterId);
     if (idx !== -1) {
@@ -400,7 +414,8 @@ $('pm-save').addEventListener('click', async () => {
         const src = URL.createObjectURL(_pmFile);
         _posterUrlCache.set(_pmPosterId, src);
         SS.posters[idx].src = src;
-        idbPutPoster({ id: _pmPosterId, blob: _pmFile, title, caption, noteId, label: _pmFile.name }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+        // 換圖不換位置：沿用原本的 ts
+        idbPutPoster({ id: _pmPosterId, blob: _pmFile, title, caption, noteId, label: _pmFile.name, ts: SS.posters[idx].ts ?? Date.now() }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
       } else {
         const records = await idbGetAllPosters();
         const rec = records.find(r => r.id === _pmPosterId);
