@@ -42,6 +42,11 @@ function extractEmbedUrl(input) {
   return input.trim();
 }
 
+// enablejsapi=1 讓嵌入播放器透過 postMessage 回報播放狀態（MUSIC 頁接續播放靠它偵測播完）
+function youtubeEmbedSrc(vid) {
+  return `https://www.youtube.com/embed/${vid}?enablejsapi=1`;
+}
+
 function normalizeEmbedUrl(input) {
   const raw = extractEmbedUrl(input);
   if (!raw) return '';
@@ -77,15 +82,15 @@ function normalizeEmbedUrl(input) {
 
   if (host === 'youtu.be') {
     const vid = pathname.split('/').filter(Boolean)[0];
-    if (vid) return `https://www.youtube.com/embed/${vid}`;
+    if (vid) return youtubeEmbedSrc(vid);
   }
   if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
     if (pathname === '/watch') {
       const vid = url.searchParams.get('v');
-      if (vid) return `https://www.youtube.com/embed/${vid}`;
+      if (vid) return youtubeEmbedSrc(vid);
     }
     const embedded = pathname.match(/^\/embed\/([^/?#]+)/);
-    if (embedded) return `https://www.youtube.com/embed/${embedded[1]}`;
+    if (embedded) return youtubeEmbedSrc(embedded[1]);
   }
 
   return url.toString();

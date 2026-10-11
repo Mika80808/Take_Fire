@@ -1589,6 +1589,14 @@ body[data-theme="WhiteNoise"] .modal-desc { color: #a34520; }
 
 /* ── Settings Overrides (Modernized Themes) ── */
 
+/* 強調色：文字、圓點、細線等只能吃單色的地方用。多數主題的主色本身就是強調色；
+   Jazz 的主色是淺灰（#d4d4d4），在深色底上跟一般白字分不出來，改用它的按鈕藍。
+   不直接用 --c-button，是因為 cyberpunk 的 --c-button 是漸層，不能當 color。 */
+body { --c-accent: var(--c-primary); --c-accent-rgb: var(--c-primary-rgb); }
+body:not([data-theme]),
+body[data-theme="jazz"]      { --c-accent: #558bff; --c-accent-rgb: 85 139 255; }
+body[data-theme="cyberpunk"] { --c-accent-rgb: 173 144 255; }   /* 它的 --c-primary-rgb 是近白色，與 #ad90ff 不符 */
+
 body[data-theme="LoveSong"] {
   color-scheme: light;
   --c-primary: #bf7e81; --c-primary-rgb: 191 126 129;
@@ -1951,15 +1959,47 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
 .cg-nb-title { font-size: 14px; font-weight: 600; color: var(--c-text); }
 .cg-nb-close { background: none; border: none; color: var(--c-text-mute); cursor: pointer; font-size: 20px; line-height: 1; padding: 2px 6px; }
 .cg-nb-close:hover { color: var(--c-text); }
-.cg-nb-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.cg-nb-cats {
+  display: flex; padding: 3px; margin-bottom: 10px;
+  border: 1px solid var(--c-primary-border); border-radius: 8px;
+}
+.cg-nb-cat {
+  flex: 1; background: none; border: none; border-radius: 6px; padding: 6px 4px;
+  font: inherit; font-size: 12px; color: var(--c-text-mute); cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.cg-nb-cat:hover { color: var(--c-text); }
+.cg-nb-cat.active { background: var(--c-button); color: #fff; }
+.cg-nb-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+  max-height: 104px; overflow-y: auto;
+}
 .cg-nb-tab {
-  flex: 1; text-align: center; font-size: 12px; padding: 7px 4px;
+  flex: 1 1 auto; min-width: 56px; max-width: 100%; box-sizing: border-box;
+  text-align: center; font-size: 12px; padding: 7px 10px;
   border-radius: 6px; cursor: pointer; color: var(--c-text-mute);
   background: transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background .2s, color .2s; user-select: none;
 }
 .cg-nb-tab:hover { color: var(--c-text); }
 .cg-nb-tab.active { background: rgb(var(--c-text-rgb) / 0.10); color: var(--c-text); }
+.cg-nb-tab.cg-nb-add {
+  flex: 0 0 auto; min-width: 0; padding: 7px 11px;
+  border: 1px dashed var(--c-primary-border); font-size: 14px; line-height: 1;
+}
+.cg-nb-tab.cg-nb-add:hover { border-color: var(--c-button); color: var(--c-text); }
+.cg-nb-text:disabled { opacity: 0.5; cursor: not-allowed; }
+.cg-nb-actions { display: flex; align-items: center; gap: 6px; }
+.cg-nb-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 27px; height: 25px; padding: 0; box-sizing: border-box;
+  background: none; border: 1px solid var(--c-primary-border); border-radius: 6px;
+  color: var(--c-text-mute); cursor: pointer; transition: background .2s, color .2s;
+}
+.cg-nb-icon:hover { background: rgb(var(--c-text-rgb) / 0.08); color: var(--c-text); }
+.cg-nb-icon-danger:hover { color: #e5534b; }
+.cg-nb-icon svg { width: 13px; height: 13px; }
+.cg-nb-icon[hidden] { display: none; }
 .cg-nb-text {
   flex: 1; width: 100%; resize: none; box-sizing: border-box;
   background: rgb(var(--c-text-rgb) / 0.04);
@@ -2453,57 +2493,82 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
 /* ── Tour ── */
 #page-tour { padding: 60px 40px; }
 .tour-page-header { position: relative; margin-bottom: 32px; }
+/* 版面：左側日期面板（圓點 + 日期）＋ 內容欄；每筆行程為獨立卡片，圓點間以時間軸線串連 */
 .tour-table-head {
   display: grid;
-  grid-template-columns: 100px 2fr 100px 100px 1.5fr 36px;
-  padding: 10px 20px; gap: 16px;
+  grid-template-columns: 170px 2fr 100px 90px 1.5fr 36px;
+  padding: 10px 20px 10px 0; gap: 16px;
   font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
   color: var(--c-text-mute);
-  border-bottom: 1px solid rgb(var(--c-text-rgb) / 0.10);
+  margin-bottom: 10px;
 }
+.tour-table-head > span:first-child { padding-left: 44px; }
 .tour-table-head > span:nth-child(5) { padding-left: 3px; }
+#tour-list { display: flex; flex-direction: column; gap: 9px; }
 .tour-row {
+  position: relative;
   display: grid;
-  grid-template-columns: 100px 2fr 100px 100px 1.5fr 36px;
-  padding: 18px 20px; gap: 16px; align-items: center;
-  border-bottom: 1px solid rgb(var(--c-text-rgb) / 0.06);
-  transition: background 0.15s, box-shadow 0.15s; cursor: default;
+  grid-template-columns: 170px 2fr 100px 90px 1.5fr 36px;
+  padding: 0 20px 0 0; gap: 16px; align-items: center; min-height: 74px;
+  border: 1px solid rgb(var(--c-text-rgb) / 0.08); border-radius: 3px;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s; cursor: default;
   background: rgb(var(--c-bg-rgb) / 0.6);
   box-shadow: 0 2px 8px rgb(var(--shadow-color) / 0.08);
+}
+/* 時間軸：卡片之間的連接線（落在卡片間距內，對齊圓點） */
+.tour-row:not(:last-child)::after {
+  content: ''; position: absolute; left: 24px; top: 100%;
+  width: 1px; height: 11px; /* 9px 間距 + 上下邊框 */
+  background: rgb(var(--c-accent-rgb) / 0.30);
+  pointer-events: none;
 }
 /* 每個 grid 子欄都加 min-width:0，防止內容撐破欄寬 */
 .tour-row > * { min-width: 0; overflow: hidden; }
 /* 狀態欄含 focus-ring 特效，不能 clip */
-.tour-row:hover { background: rgb(var(--c-bg-rgb) / 0.8); box-shadow: 0 4px 12px rgb(var(--shadow-color) / 0.12); }
-.tour-date-cell { display: flex; flex-direction: column; gap: 2px; }
-.tour-date-main { font-size: 14px; font-weight: 700; color: var(--c-text); }
-.tour-title-cell { display: flex; flex-direction: column; gap: 3px; align-self: start; }
+.tour-row:hover {
+  background: rgb(var(--c-bg-rgb) / 0.8);
+  border-color: rgb(var(--c-accent-rgb) / 0.30);
+  box-shadow: 0 4px 12px rgb(var(--shadow-color) / 0.12);
+}
+.tour-date-cell {
+  position: relative; align-self: stretch;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  padding: 14px 0 14px 44px;
+  background: linear-gradient(90deg, rgb(var(--c-text-rgb) / 0.035) 60%, transparent);
+}
+/* 時間軸圓點 */
+.tour-date-cell::before {
+  content: ''; position: absolute; left: 21px; top: 50%;
+  width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
+  background: var(--c-accent);
+  box-shadow: 0 0 0 3px rgb(var(--c-accent-rgb) / 0.15), 0 0 8px rgb(var(--c-accent-rgb) / 0.55);
+}
+.tour-date-main {
+  font-size: 18px; font-weight: 600; letter-spacing: 0.3px; white-space: nowrap;
+  color: var(--c-accent); font-variant-numeric: tabular-nums;
+}
+.tour-title-cell { display: flex; flex-direction: column; gap: 4px; padding: 14px 0; }
 .tour-title-main { font-size: 14px; font-weight: 600; color: var(--c-text); }
 .tour-location,
 .member-stat { font-size: 12px; color: var(--c-text-mute); }
 .tour-time-cell { font-size: 13px; color: var(--c-text-mute); }
-.tour-badge {
-  display: inline-flex; align-items: center;
-  padding: 0 10px; height: 30px; border-radius: 4px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
-  white-space: nowrap; flex-shrink: 0;
+.tour-body-preview {
+  font-size: 12px; color: var(--c-text-mute);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.tour-badge.done { background: rgb(16 185 129 / 0.12); color: #10b981; }
-.tour-badge.upcoming { background: rgb(var(--c-primary-rgb) / 0.12); color: var(--c-primary); }
-.tour-badge.tbd { background: rgb(var(--c-text-rgb) / 0.08); color: var(--c-text-mute); }
-.tour-body-preview { font-size: 14px; color: var(--c-text); }
 .tour-link-cell { display: flex; justify-content: flex-start; align-items: center; gap: 8px; overflow: visible; }
 /* 章節連結插槽：固定佔位避免 ✎ 按鈕水平漂移 */
 .tour-chapter-slot { display: inline-flex; align-items: center; min-width: 0; }
 .tour-chapter-link {
-  font-size: 12px; font-weight: 700; color: var(--c-primary);
-  cursor: pointer; display: flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 700; color: var(--c-accent);
+  /* 用 block 而非 flex：flex 容器內的文字無法顯示 text-overflow 的「…」 */
+  cursor: pointer; display: block; line-height: 27px;
   padding: 0 10px; height: 30px; border-radius: 4px; background: transparent;
-  border: 1.5px dashed rgb(var(--c-primary-rgb) / 0.5); font-family: inherit;
+  border: 1.5px dashed rgb(var(--c-accent-rgb) / 0.5); font-family: inherit;
   transition: border-color 0.2s, background 0.2s;
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tour-chapter-link:hover { border-color: var(--c-primary); background: rgb(var(--c-primary-rgb) / 0.06); }
+.tour-chapter-link:hover { border-color: var(--c-accent); background: rgb(var(--c-accent-rgb) / 0.06); }
 .tour-row-edit-btn {
   width: 28px; height: 28px; border-radius: 6px;
   background: transparent; border: none; color: var(--c-text-mute);
@@ -2522,9 +2587,12 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
 @media (max-width: 900px) {
   .tour-table-head,
   .tour-row {
-    grid-template-columns: 100px 2fr 100px 1.5fr 36px;
-    gap: 10px; padding: 14px 14px;
+    grid-template-columns: 148px 2fr 100px 1.5fr 36px;
+    gap: 10px; padding-right: 14px;
   }
+  .tour-date-cell { padding-left: 40px; }
+  .tour-date-main { font-size: 16px; }
+  .tour-table-head > span:first-child { padding-left: 40px; }
   .tour-time-cell { display: none; }
   .tour-table-head > *:nth-child(4) { display: none; }
 }
@@ -2533,12 +2601,19 @@ body[data-theme="cyberpunk"] .site-nav-item.active::after { background: var(--c-
   .tour-table-head { display: none; }
   .tour-row {
     display: flex; flex-direction: column; align-items: flex-start;
-    gap: 6px; padding: 14px 14px;
+    gap: 6px; padding: 0 14px 14px 0;
   }
-  .tour-date-cell { flex-direction: row; align-items: baseline; gap: 6px; }
+  .tour-row > *:not(.tour-date-cell) { margin-left: 40px; max-width: calc(100% - 40px); }
+  .tour-date-cell {
+    flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 6px;
+    align-self: stretch; padding: 12px 0 8px 40px;
+  }
+  .tour-date-cell::before { top: 22px; }
+  .tour-title-cell { padding: 0; }
+  .tour-row:not(:last-child)::after { left: 24px; }
   .tour-time-cell { display: block; }
   .tour-link-cell { width: 100%; }
-  .tour-chapter-link { max-width: 100%; width: 100%; justify-content: center; }
+  .tour-chapter-link { max-width: 100%; width: 100%; text-align: center; }
   .tour-row-edit-btn { opacity: 1; align-self: flex-end; margin-top: -28px; }
 }
 /* 標題必填錯誤提示 */
