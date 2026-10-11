@@ -82,7 +82,7 @@
         </button>
       </div>
       <div class="tour-table-head">
-        <span data-i18n="tour.date">日期</span><span data-i18n="tour.work">工作內容</span><span data-i18n="tour.place">地點</span><span data-i18n="tour.time">時間</span><span data-i18n="tour.status">狀態</span><span></span>
+        <span data-i18n="tour.date">日期</span><span data-i18n="tour.work">工作內容</span><span data-i18n="tour.place">地點</span><span data-i18n="tour.time">時間</span><span></span><span></span>
       </div>
       <div id="tour-list"></div>
     </div>
@@ -104,13 +104,25 @@
       <span class="cg-nb-title" data-i18n="nb.title">CG 設定筆記</span>
       <button class="cg-nb-close" id="cg-nb-close" type="button" aria-label="關閉">&times;</button>
     </div>
+    <div class="cg-nb-cats" id="cg-nb-cats" role="tablist">
+      <button class="cg-nb-cat active" type="button" data-cat="people" role="tab" data-i18n="nb.cat.people">人物</button>
+      <button class="cg-nb-cat" type="button" data-cat="styles" role="tab" data-i18n="nb.cat.styles">風格</button>
+    </div>
     <div class="cg-nb-tabs" id="cg-nb-tabs"></div>
-    <textarea class="cg-nb-text" id="cg-nb-text" placeholder="輸入此角色的 CG 圖片設定…" data-i18n-placeholder="nb.placeholder"></textarea>
+    <textarea class="cg-nb-text" id="cg-nb-text" placeholder="輸入此角色的 CG 圖片設定…"></textarea>
     <div class="cg-nb-foot">
-      <button class="cg-nb-copy" id="cg-nb-copy" type="button">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-        <span class="cg-nb-copy-lbl" data-i18n="nb.copy">複製</span>
-      </button>
+      <span class="cg-nb-actions">
+        <button class="cg-nb-copy" id="cg-nb-copy" type="button">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+          <span class="cg-nb-copy-lbl" data-i18n="nb.copy">複製</span>
+        </button>
+        <button class="cg-nb-icon" id="cg-nb-rename" type="button" title="重新命名" data-i18n-title="nb.rename" aria-label="重新命名" data-i18n-aria="nb.rename">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        </button>
+        <button class="cg-nb-icon cg-nb-icon-danger" id="cg-nb-delete" type="button" title="刪除" data-i18n-title="nb.delete" aria-label="刪除" data-i18n-aria="nb.delete">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>
+      </span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span id="cg-nb-saved" style="opacity:0; transition:opacity .3s;">✓ <span data-i18n="nb.saved">已自動儲存</span></span>
         <span id="cg-nb-count"></span>

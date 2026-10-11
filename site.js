@@ -17,7 +17,9 @@ const SS = {
     { id: 'kazo',     name: 'KAZO', role: 'Leader / Bass', height: '185cm', mbti: 'ESTJ', zodiac: 'Libra 10/10', bio: '', photo: null },
     { id: 'javy',     name: 'Javy', role: 'Guitar',        height: '182cm', mbti: 'ESFP', zodiac: 'Gemini 6/6',  bio: '', photo: null },
     { id: 'ace',      name: 'ACE',  role: 'Drums',         height: '184cm', mbti: 'ISTP', zodiac: 'Aries 4/1',   bio: '', photo: null },
-  ]
+  ],
+  // CG 筆記中使用者自行新增的項目（團員的筆記仍存在 members[].cgNote）
+  cgNotes     : { people: [], styles: [] },   // { id, name, cgNote }
 };
 
 const LS_SITE = 'tak_fire_site_v1';
@@ -30,6 +32,7 @@ function saveSite() {
     lsSet(LS_SITE, JSON.stringify({
       tourEvents : SS.tourEvents,
       members    : membersNoPhoto,
+      cgNotes    : SS.cgNotes,
       currentPage: SS.currentPage,
     }));
   } catch(e) {
@@ -46,6 +49,14 @@ function loadSite() {
     SS.members = Array.isArray(d.members) && d.members.length
       ? d.members.map((m, i) => ({ ...m, id: m?.id || SS.members[i]?.id || uid(), photo: null, cgNote: typeof m?.cgNote === 'string' ? m.cgNote : '' }))
       : SS.members;
+    const cleanNotes = arr => Array.isArray(arr)
+      ? arr.filter(n => n && typeof n === 'object').map(n => ({
+          id: n.id || uid(),
+          name: typeof n.name === 'string' ? n.name : '',
+          cgNote: typeof n.cgNote === 'string' ? n.cgNote : '',
+        }))
+      : [];
+    SS.cgNotes = { people: cleanNotes(d.cgNotes?.people), styles: cleanNotes(d.cgNotes?.styles) };
     SS.currentPage = SITE_PAGES.has(d.currentPage) ? d.currentPage : 'poster';
   } catch(e) {}
 }
@@ -104,21 +115,31 @@ function renderSitePage(page) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   CG Notebook — 每個角色一組設定文字
+   CG Notebook — 分「人物」「風格」兩類，每個項目一組設定文字
+   人物 = 團員（固定，筆記存 members[].cgNote）+ 自行新增的人物
+   風格 = 全部自行新增
 ══════════════════════════════════════════════════════════ */
-let _cgNbIdx = 0;
+let _cgNbCat = 'people';
+const _cgNbSel = { people: null, styles: null };  // 各分類目前選取項目的 id
+let _cgNbCur = null;                               // textarea 目前對應的項目物件
 let _cgNbTimer = null;
+
+function cgNbEntries(cat) {
+  return cat === 'people' ? [...SS.members, ...SS.cgNotes.people] : SS.cgNotes.styles;
+}
+
+function cgNbIsCustom(entry) {
+  return !!entry && !SS.members.includes(entry);
+}
 
 function openCGNotebook() {
   const d = $('cg-nb-drawer'); if (!d) return;
-  if (_cgNbIdx >= SS.members.length) _cgNbIdx = 0;
-  buildCGNbTabs();
-  cgNbSelect(_cgNbIdx);
+  renderCGNb();
   d.classList.add('open');
   d.setAttribute('aria-hidden', 'false');
   $('cg-nb-overlay')?.classList.add('open');
   $('cg-nb-fab')?.classList.add('cg-nb-hidden');
-  setTimeout(() => $('cg-nb-text')?.focus(), 280);
+  setTimeout(() => { const ta = $('cg-nb-text'); if (ta && !ta.disabled) ta.focus(); }, 280);
 }
 
 function closeCGNotebook() {
@@ -130,26 +151,139 @@ function closeCGNotebook() {
   $('cg-nb-fab')?.classList.remove('cg-nb-hidden');
 }
 
-function buildCGNbTabs() {
+function renderCGNb() {
+  const list = cgNbEntries(_cgNbCat);
+  const cur = list.find(e => e.id === _cgNbSel[_cgNbCat]) || list[0] || null;
+  _cgNbSel[_cgNbCat] = cur ? cur.id : null;
+  $('cg-nb-cats')?.querySelectorAll('.cg-nb-cat').forEach(b => {
+    const on = b.dataset.cat === _cgNbCat;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  buildCGNbTabs(list, cur);
+  loadCGNbEntry(cur);
+}
+
+function buildCGNbTabs(list, cur) {
   const wrap = $('cg-nb-tabs'); if (!wrap) return;
   wrap.innerHTML = '';
-  SS.members.forEach((m, i) => {
+  list.forEach(entry => {
     const b = document.createElement('div');
-    b.className = 'cg-nb-tab' + (i === _cgNbIdx ? ' active' : '');
-    b.textContent = m.name || t('member.unnamed');
+    b.className = 'cg-nb-tab' + (entry === cur ? ' active' : '');
+    b.dataset.id = entry.id;
+    b.textContent = entry.name || t('member.unnamed');
     b.title = b.textContent;
-    b.addEventListener('click', () => cgNbSelect(i));
+    b.addEventListener('click', () => cgNbSelect(entry.id));
+    if (cgNbIsCustom(entry)) b.addEventListener('dblclick', () => renameCGNbEntry(entry));
+    addKeyActivation(b);
     wrap.appendChild(b);
+  });
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'cg-nb-tab cg-nb-add';
+  add.textContent = '+';
+  add.title = t(_cgNbCat === 'people' ? 'nb.addPeople' : 'nb.addStyles');
+  add.setAttribute('aria-label', add.title);
+  add.addEventListener('click', addCGNbEntry);
+  wrap.appendChild(add);
+}
+
+function cgNbSelect(id) {
+  const entry = cgNbEntries(_cgNbCat).find(e => e.id === id);
+  if (!entry || entry === _cgNbCur) return;
+  flushCGNbSave();
+  _cgNbSel[_cgNbCat] = id;
+  $('cg-nb-tabs')?.querySelectorAll('.cg-nb-tab[data-id]').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+  loadCGNbEntry(entry);
+}
+
+function cgNbSwitchCat(cat) {
+  if (cat === _cgNbCat || !(cat in _cgNbSel)) return;
+  flushCGNbSave();
+  _cgNbCat = cat;
+  renderCGNb();
+}
+
+function loadCGNbEntry(entry) {
+  _cgNbCur = entry;
+  const ta = $('cg-nb-text');
+  if (ta) {
+    ta.value = entry?.cgNote || '';
+    ta.disabled = !entry;
+    ta.placeholder = entry
+      ? t(_cgNbCat === 'people' ? 'nb.placeholder' : 'nb.placeholderStyle')
+      : t(_cgNbCat === 'people' ? 'nb.emptyPeople' : 'nb.emptyStyles');
+  }
+  const custom = cgNbIsCustom(entry);
+  const rn = $('cg-nb-rename'), del = $('cg-nb-delete');
+  if (rn) rn.hidden = !custom;
+  if (del) del.hidden = !custom;
+  updateCGNbCount();
+}
+
+function addCGNbEntry() {
+  flushCGNbSave();
+  const cat = _cgNbCat;
+  showModal({
+    title: t(cat === 'people' ? 'nb.addPeople' : 'nb.addStyles'),
+    showInput: true,
+    inputValue: '',
+    onConfirm: val => {
+      const name = (val || '').trim();
+      if (!name) return;
+      const entry = { id: uid(), name, cgNote: '' };
+      SS.cgNotes[cat].push(entry);
+      _cgNbSel[cat] = entry.id;
+      saveSite();
+      if (_cgNbCat !== cat) return;
+      renderCGNb();
+      $('cg-nb-tabs')?.querySelector('.cg-nb-tab.active')?.scrollIntoView({ block: 'nearest' });
+      $('cg-nb-text')?.focus();
+    }
   });
 }
 
-function cgNbSelect(i) {
-  if (i !== _cgNbIdx) flushCGNbSave();
-  _cgNbIdx = i;
-  $('cg-nb-tabs')?.querySelectorAll('.cg-nb-tab').forEach((b, idx) => b.classList.toggle('active', idx === i));
-  const ta = $('cg-nb-text');
-  if (ta) ta.value = SS.members[i]?.cgNote || '';
-  updateCGNbCount();
+function renameCGNbEntry(entry) {
+  if (!cgNbIsCustom(entry)) return;
+  flushCGNbSave();
+  showModal({
+    title: t('nb.rename'),
+    showInput: true,
+    inputValue: entry.name,
+    confirmText: t('modal.save'),
+    onConfirm: val => {
+      const name = (val || '').trim();
+      if (!name || name === entry.name) return;
+      entry.name = name;
+      saveSite();
+      renderCGNb();
+    }
+  });
+}
+
+function deleteCGNbEntry(entry) {
+  if (!cgNbIsCustom(entry)) return;
+  flushCGNbSave();
+  showModal({
+    title: t('nb.delete'),
+    desc: tf('nb.deleteConfirm', entry.name),
+    confirmClass: 'btn-danger',
+    confirmText: t('modal.delete'),
+    onConfirm: () => {
+      const cat = SS.cgNotes.people.includes(entry) ? 'people' : 'styles';
+      const arr = SS.cgNotes[cat];
+      const i = arr.indexOf(entry);
+      if (i < 0) return;
+      arr.splice(i, 1);
+      // 選取改為同分類中的相鄰項目
+      const list = cgNbEntries(cat);
+      const nextIdx = cat === 'people' ? SS.members.length + Math.min(i, arr.length - 1) : Math.min(i, arr.length - 1);
+      _cgNbSel[cat] = list[nextIdx]?.id ?? list[list.length - 1]?.id ?? null;
+      if (_cgNbCur === entry) _cgNbCur = null;
+      saveSite();
+      renderCGNb();
+    }
+  });
 }
 
 function updateCGNbCount() {
@@ -164,8 +298,8 @@ function scheduleCGNbSave() {
 
 function flushCGNbSave() {
   clearTimeout(_cgNbTimer); _cgNbTimer = null;
-  const ta = $('cg-nb-text'); if (!ta) return;
-  const m = SS.members[_cgNbIdx]; if (!m) return;
+  const ta = $('cg-nb-text'); if (!ta || ta.disabled) return;
+  const m = _cgNbCur; if (!m) return;
   if (m.cgNote === ta.value) return;
   m.cgNote = ta.value;
   saveSite();
@@ -184,6 +318,11 @@ function flashCGNbSaved() {
   $('cg-nb-close')?.addEventListener('click', closeCGNotebook);
   $('cg-nb-overlay')?.addEventListener('click', closeCGNotebook);
   $('cg-nb-text')?.addEventListener('input', () => { updateCGNbCount(); scheduleCGNbSave(); });
+  $('cg-nb-cats')?.querySelectorAll('.cg-nb-cat').forEach(b => {
+    b.addEventListener('click', () => cgNbSwitchCat(b.dataset.cat));
+  });
+  $('cg-nb-rename')?.addEventListener('click', () => renameCGNbEntry(_cgNbCur));
+  $('cg-nb-delete')?.addEventListener('click', () => deleteCGNbEntry(_cgNbCur));
   $('cg-nb-copy')?.addEventListener('click', () => {
     const ta = $('cg-nb-text'); if (!ta) return;
     copyTextToClipboard(ta.value, () => {
@@ -195,7 +334,8 @@ function flashCGNbSaved() {
     });
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && $('cg-nb-drawer')?.classList.contains('open')) closeCGNotebook();
+    // 彈窗的 Esc 會 preventDefault，此時只關彈窗、不關抽屜
+    if (e.key === 'Escape' && !e.defaultPrevented && $('cg-nb-drawer')?.classList.contains('open')) closeCGNotebook();
   });
 })();
 
@@ -890,7 +1030,90 @@ function armSinglePlaybackIframe(iframe, kind, sourceUrl = '', size = 'large') {
   };
   iframe.addEventListener('pointerdown', handler);
   iframe.addEventListener('focus', handler);
+  armYouTubeIframe(iframe);
 }
+
+/* ── YouTube 嵌入播放器橋接 ──────────────────────────────────
+   嵌入網址帶 enablejsapi=1 時，YouTube 會透過 postMessage 回報播放狀態，
+   也接受 playVideo 等指令。不載入官方 iframe_api 腳本，直接講它的訊息協定：
+   因為 stopEmbeddedIframes 會整個換掉 iframe，用全域監聽 + 比對 e.source
+   比替每個 iframe 包一個 YT.Player 單純。
+   狀態碼：-1 未開始、0 播完、1 播放中、2 暫停、3 緩衝、5 已載入 */
+const YT_ORIGIN_RE = /^https:\/\/(www\.)?youtube(-nocookie)?\.com$/;
+const _ytState = new WeakMap();   // iframe → { ready, state, pendingPlay }
+
+function isYouTubeEmbedSrc(src) {
+  try {
+    const u = new URL(src);
+    return /^(www\.)?youtube(-nocookie)?\.com$/.test(u.hostname) && u.pathname.startsWith('/embed/');
+  } catch (_) {
+    return false;
+  }
+}
+
+function ytPost(iframe, msg) {
+  try { iframe.contentWindow?.postMessage(JSON.stringify(msg), 'https://www.youtube.com'); } catch (_) {}
+}
+
+// YouTube 收到 listening 之後才開始回報；剛載入時播放器可能還沒就緒，
+// 所以每 250ms 重送，直到收到第一則回應（最多 5 秒）
+function ytHandshake(iframe) {
+  const st = { ready: false, state: -1, pendingPlay: !!_ytState.get(iframe)?.pendingPlay };
+  _ytState.set(iframe, st);
+  let tries = 0;
+  const tick = () => {
+    if (st.ready || tries++ >= 20 || !iframe.isConnected || _ytState.get(iframe) !== st) return;
+    ytPost(iframe, { event: 'listening', id: 'take-fire', channel: 'widget' });
+    setTimeout(tick, 250);
+  };
+  tick();
+}
+
+function armYouTubeIframe(iframe) {
+  if (!iframe || iframe._ytArmed) return;
+  iframe._ytArmed = true;
+  iframe.addEventListener('load', () => {
+    if (isYouTubeEmbedSrc(iframe.src)) ytHandshake(iframe);
+    else _ytState.delete(iframe);   // 被清成 about:blank
+  });
+}
+
+// 播放器就緒就直接下指令，否則記下來，等握手成功時補送
+function ytPlay(iframe) {
+  const st = _ytState.get(iframe);
+  if (st?.ready) ytPost(iframe, { event: 'command', func: 'playVideo', args: [] });
+  else if (st) st.pendingPlay = true;
+  else _ytState.set(iframe, { ready: false, state: -1, pendingPlay: true });
+}
+
+window.addEventListener('message', e => {
+  if (!YT_ORIGIN_RE.test(e.origin)) return;
+  let data;
+  try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (_) { return; }
+  if (!data || typeof data !== 'object') return;
+  const iframe = [...document.querySelectorAll('iframe')].find(f => f.contentWindow === e.source);
+  const st = iframe && _ytState.get(iframe);
+  if (!st) return;
+
+  if (!st.ready) {
+    st.ready = true;
+    if (st.pendingPlay) {
+      st.pendingPlay = false;
+      ytPost(iframe, { event: 'command', func: 'playVideo', args: [] });
+    }
+  }
+
+  let state;
+  if (data.event === 'onStateChange') state = data.info;
+  else if (data.event === 'infoDelivery' && typeof data.info?.playerState === 'number') state = data.info.playerState;
+  // 同一個狀態會從 onStateChange 與 infoDelivery 各來一次，只處理轉變的那一刻
+  if (typeof state !== 'number' || state === st.state) return;
+  st.state = state;
+
+  if (state === 0 && iframe.closest('.music-embed-wrap')) {
+    playNextMusicCard(iframe.closest('.music-card'));
+  }
+});
 
 function stopStorySongPlayback(exceptAudio = null, exceptIframe = null) {
   document.querySelectorAll('.song-embed-wrap audio').forEach(audio => {
@@ -912,6 +1135,36 @@ function stopOfficialMusicPlayback(exceptAudio = null, exceptIframe = null) {
 function enforceSingleSongPlayback(opts = {}) {
   stopStorySongPlayback(opts.exceptStoryAudio || null, opts.exceptStoryIframe || null);
   stopOfficialMusicPlayback(opts.exceptOfficialAudio || null, opts.exceptOfficialIframe || null);
+}
+
+// 接續播放：從 fromCard 之後依序找下一首可接續的卡片（MP3 或 YouTube），展開並播放。
+// 其他嵌入來源（Suno、Spotify…）沒有 API 可偵測播完或下指令，一律跳過；
+// 最後一首播完就停。
+async function playNextMusicCard(fromCard) {
+  if (!fromCard?.isConnected) return false;
+  for (let next = fromCard.nextElementSibling; next; next = next.nextElementSibling) {
+    if (!next.classList.contains('music-card')) continue;
+    const audio = next._musicAudio;
+    if (audio) {
+      // 先確認拿得到音檔再展開，避免停在一張無法播放的卡片上
+      if (!await audio.ensure()) continue;
+      if (!fromCard.isConnected || musicNowPlaying.audio) return false;   // 等待期間頁面重繪或使用者已手動播別首
+      next._musicOpen();
+      await audio.play();
+    } else {
+      const yt = next.querySelector('.music-embed-wrap iframe');
+      if (!yt || !isYouTubeEmbedSrc(yt.dataset.origSrc || yt.src)) continue;
+      next._musicOpen();   // 會還原被清空的 src，並停掉其他來源
+      // openCard 可能換掉 iframe，重新查一次
+      const iframe = next.querySelector('.music-embed-wrap iframe');
+      if (iframe) ytPlay(iframe);
+    }
+    if (SS.currentPage === 'music' && document.body.classList.contains('site-mode')) {
+      next.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    return true;
+  }
+  return false;
 }
 
 function renderMusicPage() {
@@ -1190,10 +1443,13 @@ function renderMusicPage() {
             curEl.textContent = fmtTime(player.currentTime);
           });
           player.addEventListener('loadedmetadata', () => { durEl.textContent = fmtTime(player.duration); });
+          // 循環開啟時 ended 不會觸發，所以走到這裡一定是「整首自然播完」
           player.addEventListener('ended', () => {
             setMusicPlayState(playBtn, card, false);
             seek.value = 0; curEl.textContent = '0:00';
-            if (musicNowPlaying.audio === player) musicNowPlaying.clear();
+            if (musicNowPlaying.audio !== player) return;
+            musicNowPlaying.clear();
+            playNextMusicCard(card);
           });
           return true;
         },
@@ -1485,9 +1741,6 @@ function renderTourPage() {
     return;
   }
 
-  // 今天（YYYY-MM-DD）— 用本地時區計算，避免時區位移
-  const todayStr = toDateStr(new Date());
-
   all.forEach(evt => {
     const row = document.createElement('div');
     row.className = 'tour-row';
@@ -1521,23 +1774,12 @@ function renderTourPage() {
     timeCell.className = 'tour-time-cell';
     timeCell.textContent = evt.time || '—';
 
-    // 狀態 + 連結
+    // 章節連結
     const linkCell = document.createElement('div');
     linkCell.className = 'tour-link-cell';
 
-    // 狀態以「日期 vs 今天」判斷；無日期視為待定
-    let status; // 'done' | 'upcoming' | 'tbd'
-    if (!evt.date) status = 'tbd';
-    else if (evt.date < todayStr) status = 'done';
-    else status = 'upcoming';
-
     const folder = evt.folderId ? S.folders.find(f => f.id === evt.folderId) : null;
     const hasValidFolder = !!folder; // 防孤立 folderId
-
-    const badge = document.createElement('span');
-    badge.className = `tour-badge ${status}`;
-    badge.textContent = status === 'done' ? t('tour.done') : status === 'tbd' ? t('tour.tbd') : t('tour.upcoming');
-    linkCell.appendChild(badge);
 
     // 章節連結插槽（永遠保留位置以避免 ✎ 漂移）
     const chapterSlot = document.createElement('span');
