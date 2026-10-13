@@ -675,7 +675,8 @@ async function exportAllData() {
     localStorage: {
       tak_fire_v2: lsGet('tak_fire_v2'),
       tak_fire_v2_sys: lsGet('tak_fire_v2_sys'),
-      tak_fire_site_v1: lsGet('tak_fire_site_v1')
+      tak_fire_site_v1: lsGet('tak_fire_site_v1'),
+      tak_fire_filters_v1: lsGet('tak_fire_filters_v1')
     },
     idb
   };
@@ -850,7 +851,7 @@ async function importAllData(file) {
   // 先把備份內容全部整理、驗證完，才開始動現有資料
   const prepared = await prepareStoreRecords(payload.idb || {}, IMPORT_STORES, resolveFile);
 
-  const lsKeys = ['tak_fire_v2', 'tak_fire_v2_sys', 'tak_fire_site_v1'];
+  const lsKeys = ['tak_fire_v2', 'tak_fire_v2_sys', 'tak_fire_site_v1', 'tak_fire_filters_v1'];
 
   // 匯入前先備份目前的 localStorage 與 IDB 內容，若寫入中途失敗就整批還原，
   // 避免出現「部分 store 已被新資料覆蓋、部分還沒寫入」的半新半舊毀損狀態。
@@ -865,6 +866,7 @@ async function importAllData(file) {
     if (ls.tak_fire_v2)      lsSet('tak_fire_v2',      ls.tak_fire_v2);
     if (ls.tak_fire_v2_sys)  lsSet('tak_fire_v2_sys',  ls.tak_fire_v2_sys);
     if (ls.tak_fire_site_v1) lsSet('tak_fire_site_v1', ls.tak_fire_site_v1);
+    if (ls.tak_fire_filters_v1) lsSet('tak_fire_filters_v1', ls.tak_fire_filters_v1);
 
     // 2. 清空並還原 IDB
     await writeStoresFromRecords(prepared, IMPORT_STORES);
