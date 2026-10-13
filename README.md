@@ -21,10 +21,14 @@ Take Fire 樂團的故事整理工具與官網原型，純前端、無後端。�
 | `tak_fire_v2` | 資料夾結構、事件筆記、歌曲中繼資料、名稱順序、角色標籤、排序與摺疊狀態 | ✅ |
 | `tak_fire_v2_sys` | 系統設定：主題、字體、字級、語言 | ✅ |
 | `tak_fire_site_v1` | 官網資料：Tour 行程、成員資料（不含照片）、目前分頁 | ✅ |
+| `tak_fire_filters_v1` | Photo 頁濾鏡：匯入的 LUT（降取樣成 17³、8-bit） | ✅ |
 | `tak_fire_view_v1` | 目前開啟的資料夾與各資料夾的捲動位置 | ❌ |
 | `tak_fire_guide_v1` | 新手導覽是否已看過 | ❌ |
 
 `tak_fire_view_v1` 不進備份是刻意的——那只是瀏覽狀態，不是內容。
+
+照片套濾鏡時原圖不動，IDB 的照片紀錄只多一個 `filterId`；套色後的版本是顯示時即時算出、
+只快取在記憶體，不另外存檔。
 
 ### IndexedDB
 
@@ -46,7 +50,7 @@ Photo 頁 1600px、背景 1920px。
 ## 備份與還原
 
 **備份**：右上角「匯出」。會存成 `take_fire_backup_日期_時分.zip`，
-內含上表所有標示 ✅ 的項目：`manifest.json` 放三個 localStorage 鍵與六個 IDB store 的紀錄，
+內含上表所有標示 ✅ 的項目：`manifest.json` 放四個 localStorage 鍵與六個 IDB store 的紀錄，
 圖片與音檔以原檔另存在 `media/` 底下。zip 只打包不壓縮，解開後可以直接看到裡面的圖片和 MP3。
 
 **還原**：右上角「匯入」，選那個 `.zip`。舊版匯出的 `.json` 備份也能匯入。
@@ -74,9 +78,10 @@ core.js      IndexedDB 層、localStorage 包裝、i18n 字典、工具函式、
 story.js     Story Mode 的渲染與互動、開機流程
 site.js      SS 狀態、官網四個頁面、IG 檢視、行動抽屜
 guide.js     Story Mode 新手導覽（第一次開啟時出現，系統設定可重看）
+filter.js    Photo 頁濾鏡：LUT 匯入與套色、大圖的濾鏡列與複製圖片、GPT 濾鏡提示詞
 ```
 
-四個 js 用一般 `<script>` 標籤依序載入，**不是 ES module**，彼此靠全域變數溝通
+五個 js 用一般 `<script>` 標籤依序載入，**不是 ES module**，彼此靠全域變數溝通
 （`S`、`SS`、`$`、`t`、`esc` 與各 `idb*` 函式）。因此**載入順序不能調換**，
 也不要在 `<script>` 上加 `defer` 或 `type="module"`。
 

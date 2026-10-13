@@ -98,6 +98,32 @@
   <button class="cg-nb-fab" id="cg-nb-fab" type="button" title="CG 設定筆記" data-i18n-title="nb.title" aria-label="CG 設定筆記" data-i18n-aria="nb.title" style="display:none;">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
   </button>
+  <!-- 濾鏡提示詞：LUT 預覽 → 複製給 GPT 的提示詞 -->
+  <button class="flt-fab" id="flt-fab" type="button" title="濾鏡提示詞" data-i18n-title="flt.title" aria-label="濾鏡提示詞" data-i18n-aria="flt.title" style="display:none;">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 3 7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+  </button>
+  <div class="flt-overlay" id="flt-overlay" aria-hidden="true">
+    <div class="flt-box" role="dialog" aria-labelledby="flt-title">
+      <input type="file" id="flt-input" accept=".cube" multiple hidden>
+      <div class="flt-head">
+        <span class="flt-title" id="flt-title" data-i18n="flt.title">濾鏡提示詞</span>
+        <span class="flt-head-actions">
+          <button class="flt-btn flt-btn-primary" id="flt-import" type="button" data-i18n="flt.import">匯入 LUT</button>
+          <button class="flt-close" id="flt-close" type="button" aria-label="關閉">&times;</button>
+        </span>
+      </div>
+      <div class="flt-hint" data-i18n="flt.hint">點濾鏡預覽圖即複製提示詞，貼到 GPT 並附上要套用的圖片。</div>
+      <div class="flt-grid" id="flt-grid"></div>
+      <div class="flt-empty" id="flt-empty" data-i18n="flt.empty" hidden>還沒有濾鏡。點右上「匯入 LUT」選擇 .cube 檔。</div>
+      <div class="flt-prompt-wrap" id="flt-prompt-wrap" hidden>
+        <div class="flt-prompt-head">
+          <span data-i18n="flt.promptLabel">最近複製的提示詞</span>
+          <button class="flt-btn" id="flt-prompt-copy" type="button" data-i18n="nb.copy">複製</button>
+        </div>
+        <textarea class="flt-prompt" id="flt-prompt" readonly></textarea>
+      </div>
+    </div>
+  </div>
   <div class="cg-nb-overlay" id="cg-nb-overlay"></div>
   <aside class="cg-nb-drawer" id="cg-nb-drawer" aria-hidden="true">
     <div class="cg-nb-head">
@@ -145,7 +171,20 @@
           <button type="button" class="ig-modal-move-btn" id="ig-modal-move-prev" data-i18n="poster.moveEarlier">‹ 往前移</button>
           <button type="button" class="ig-modal-move-btn" id="ig-modal-move-next" data-i18n="poster.moveLater">往後移 ›</button>
         </div>
-        <button class="ig-modal-close" id="ig-modal-close" aria-label="關閉" data-i18n-aria="a11y.close">✕</button>
+        <span class="ig-modal-head-actions">
+          <button class="ig-modal-copy ig-flt-toggle" id="ig-flt-toggle" type="button" title="濾鏡" aria-label="濾鏡" aria-expanded="false" aria-controls="ig-flt" hidden>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.4 10.5l4.77-8.26C13.47 2.09 12.75 2 12 2c-2.4 0-4.6.85-6.32 2.25l3.66 6.35.06-.1zM21.54 9c-.92-2.92-3.15-5.26-6-6.34L11.88 9h9.66zm.26 1h-7.49l.29.5 4.76 8.25C21 16.97 22 14.61 22 12c0-.69-.07-1.35-.2-2zM8.54 12l-3.9-6.75C3.01 7.03 2 9.39 2 12c0 .69.07 1.35.2 2h7.49l-1.15-2zm-6.08 3c.92 2.92 3.15 5.26 6 6.34L12.12 15H2.46zm11.27 0l-3.9 6.76c.7.15 1.42.24 2.17.24 2.4 0 4.6-.85 6.32-2.25l-3.66-6.35-.93 1.6z"/></svg>
+          </button>
+          <button class="ig-modal-copy" id="ig-modal-copy" type="button" title="複製圖片" data-i18n-title="flt.copyImg" aria-label="複製圖片" data-i18n-aria="flt.copyImg">
+            <svg class="ig-copy-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+            <svg class="ig-copy-done" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          </button>
+          <button class="ig-modal-close" id="ig-modal-close" aria-label="關閉" data-i18n-aria="a11y.close">✕</button>
+        </span>
+      </div>
+      <div class="ig-flt" id="ig-flt" hidden>
+        <div class="ig-flt-head"><span data-i18n="flt.label">濾鏡</span><span class="ig-flt-hint" id="ig-flt-hint"></span></div>
+        <div class="ig-flt-strip" id="ig-flt-strip"></div>
       </div>
       <div class="ig-modal-caption-wrap">
         <textarea class="ig-modal-caption-textarea" id="ig-modal-caption" placeholder="新增說明文字…" data-i18n-placeholder="igm.captionPh"></textarea>
@@ -526,5 +565,6 @@
 <script src="story.js"></script>
 <script src="site.js"></script>
 <script src="guide.js"></script>
+<script src="filter.js"></script>
 </body>
 </html>
