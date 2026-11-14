@@ -435,6 +435,19 @@ let _renderGeneration = 0;
 // 當前 renderMsgs 完成後 resolve 的 Promise（供 jumpToEvent 等待）
 let _renderDonePromise = Promise.resolve();
 
+const MSG_MENU_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+
+// 訊息右下角的「⋯」按鈕：點了跳出複製／編輯／刪除選單
+function makeMsgMenuBtn() {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'msg-menu-btn';
+  btn.innerHTML = MSG_MENU_ICON;
+  btn.setAttribute('aria-haspopup', 'menu');
+  setBtnLabel(btn, t('msgMenu.more'));
+  return btn;
+}
+
 function buildMsgElement(msg, idx, msgs) {
   if (msg.type === 'sep') {
     const el = document.createElement('div');
@@ -453,6 +466,7 @@ function buildMsgElement(msg, idx, msgs) {
     text.className = 'msg-system-text';
     text.innerHTML = renderLines(msg.lines);
     sys.appendChild(text);
+    sys.appendChild(makeMsgMenuBtn());
     // 事件透過 #message-list 委派處理（見 initMessageListDelegation）
     return sys;
   }
@@ -497,7 +511,14 @@ function buildMsgElement(msg, idx, msgs) {
   bubble.className = 'msg-bubble';
   bubble.innerHTML = renderLines(msg.lines);
 
-  wrap.appendChild(bubble);
+  // 泡泡外包一層定位用的盒子，「更多」按鈕掛在泡泡右下角。
+  // 按鈕不放進泡泡本身：編輯後泡泡會整個重畫 innerHTML，放裡面會被洗掉。
+  const box = document.createElement('div');
+  box.className = 'msg-bubble-box';
+  box.appendChild(bubble);
+  box.appendChild(makeMsgMenuBtn());
+
+  wrap.appendChild(box);
   wrap.appendChild(timeEl);
 
   col.appendChild(nameEl);
@@ -529,6 +550,8 @@ function initMessageListDelegation() {
   list.addEventListener('click', e => {
     const el = findTarget(e);
     if (!el) return;
+    const menuBtn = e.target.closest('.msg-menu-btn');
+    if (menuBtn) { toggleMsgMenu(menuBtn, el.dataset.id); return; }
     const msgId = el.dataset.id;
     const idx = +el.dataset.idx;
     handleClick(msgId, idx, S.allMessages);
@@ -536,7 +559,7 @@ function initMessageListDelegation() {
 
   list.addEventListener('dblclick', e => {
     const el = findTarget(e);
-    if (!el) return;
+    if (!el || e.target.closest('.msg-menu-btn')) return;
     e.preventDefault();
     window.getSelection().removeAllRanges();
     editMessage(el.dataset.id);
@@ -544,10 +567,96 @@ function initMessageListDelegation() {
 
   list.addEventListener('mousedown', e => {
     const el = findTarget(e);
-    if (!el) return;
+    if (!el || e.target.closest('.msg-menu-btn')) return;
     handleMouseDown(e, el.dataset.id);
   });
+  // 列表一捲動，選單就跟按鈕對不上了，直接收起來
+  list.addEventListener('scroll', () => closeMsgMenu(), { passive: true });
 }
+
+/* ── 單則訊息的選單：複製／編輯／刪除 ── */
+let _msgMenuId = null;
+let _msgMenuBtn = null;
+
+function closeMsgMenu({ refocus = false } = {}) {
+  if (!_msgMenuBtn) return;
+  const btn = _msgMenuBtn;
+  $('msg-menu').style.display = 'none';
+  btn.classList.remove('open');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.closest('.msg-row, .msg-system-divider')?.classList.remove('menu-open');
+  _msgMenuId = null;
+  _msgMenuBtn = null;
+  if (refocus && btn.isConnected) btn.focus();
+}
+
+function toggleMsgMenu(btn, msgId) {
+  if (_msgMenuBtn === btn) { closeMsgMenu(); return; }
+  closeMsgMenu();
+  _msgMenuId = msgId;
+  _msgMenuBtn = btn;
+  btn.classList.add('open');
+  btn.setAttribute('aria-expanded', 'true');
+  btn.closest('.msg-row, .msg-system-divider')?.classList.add('menu-open');
+
+  // 先顯示量尺寸，再貼著按鈕擺放並夾進視窗：預設在按鈕下方靠右對齊，下面放不下就改到上方
+  const menu = $('msg-menu');
+  menu.style.visibility = 'hidden';
+  menu.style.display = 'flex';
+  const r = btn.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = r.right - mw;
+  let top  = r.bottom + 6;
+  if (top + mh > window.innerHeight - 8) top = r.top - mh - 6;
+  left = Math.min(Math.max(8, left), window.innerWidth - mw - 8);
+  top  = Math.max(8, top);
+  menu.style.left = `${left}px`;
+  menu.style.top  = `${top}px`;
+  menu.style.visibility = 'visible';
+  menu.querySelector('.folder-menu-item')?.focus({ preventScroll: true });
+}
+
+function copyMessage(msgId) {
+  const msg = S.allMessages.find(m => m.id === msgId);
+  if (!msg) return;
+  copyTextToClipboard((msg.lines || []).join('\n'), () => showUndoToast(t('msgMenu.copied')));
+}
+
+$('msg-menu').addEventListener('click', e => {
+  const item = e.target.closest('[data-act]');
+  if (!item) return;
+  const id = _msgMenuId;
+  closeMsgMenu();
+  if (!id) return;
+  if (item.dataset.act === 'copy')   copyMessage(id);
+  if (item.dataset.act === 'edit')   editMessage(id);
+  if (item.dataset.act === 'delete') deleteMessagesByIds([id]);   // 不另外確認：下方提示條可以復原
+});
+// 選單內用上下鍵移動、Esc 關閉並把焦點還給按鈕
+$('msg-menu').addEventListener('keydown', e => {
+  const items = [...$('msg-menu').querySelectorAll('.folder-menu-item')];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    e.stopPropagation();
+    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMsgMenu({ refocus: true });
+  } else if (e.key === 'Tab') {
+    closeMsgMenu();
+  }
+});
+// 點選單與按鈕以外的地方就關閉
+document.addEventListener('pointerdown', e => {
+  if (_msgMenuBtn && !e.target.closest('#msg-menu, .msg-menu-btn')) closeMsgMenu();
+}, true);
+window.addEventListener('resize', () => closeMsgMenu());
+// 焦點不在選單裡時（例如用滑鼠點開）按 Esc 也要能關
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _msgMenuBtn) { e.preventDefault(); closeMsgMenu(); }
+}, true);
 
 const RENDER_BATCH_SIZE = 40;
 const _ric = typeof requestIdleCallback === 'function'
@@ -1136,6 +1245,7 @@ function showModal(opts) {
   descEl.style.display = opts.desc ? '' : 'none';
   // 沒有 desc 時，標題底部要補回相當於上方 padding 的間距，避免標題偏上、上下留白不對稱
   $('modal-box').classList.toggle('no-desc', !opts.desc);
+  $('modal-box').classList.toggle('wide', !!opts.wide);
   $('modal-overlay').style.display = 'flex';
   
   const input = $('modal-input-field');
@@ -1214,6 +1324,7 @@ function editMessage(msgId) {
     title: t('msg.edited'),
     desc: tf('msg.editingFor', msg.name),
     showTextarea: true,
+    wide: true,   // 訊息常常很長，用加寬加高的版面
     inputValue: msg.lines.join('\n'),
     confirmText: t('modal.save'),
     onConfirm: (val) => {
@@ -1333,7 +1444,13 @@ $('undo-toast').addEventListener('mouseleave', () => {
 });
 
 function deleteSelectedMessages() {
-  const ids = [...S.selSet];
+  deleteMessagesByIds([...S.selSet]);
+}
+
+// 刪除指定的訊息（選取刪除與單則訊息選單共用），之後可從提示條復原
+function deleteMessagesByIds(ids) {
+  if (!ids.length) return;
+  closeMsgMenu();
   const cls = classifiedIds();
   const wasUnclassified = ids.filter(id => !cls.has(id)).length;
   const idSet = new Set(ids);
@@ -1348,7 +1465,7 @@ function deleteSelectedMessages() {
 
   idbDeleteMessages(ids).catch(err => console.warn('idbDeleteMessages:', err));
   S.allMessages = S.allMessages.filter(m => !idSet.has(m.id));
-  S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
+  S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !idSet.has(id)); });
   // 直接從 DOM 移除，避免重繪導致捲動位置跳回頂部
   const list = $('message-list');
   ids.forEach(id => {
@@ -3797,6 +3914,7 @@ function anyOverlayOpen() {
   return shown('modal-overlay') || shown('settings-overlay') || shown('icon-picker-overlay')
     || $('msg-search-overlay').classList.contains('open')
     || $('trash-confirm').classList.contains('open')
+    || !!_msgMenuBtn
     || !!document.querySelector('.guide-blocker');
 }
 
