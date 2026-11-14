@@ -7,7 +7,7 @@
 /* ── State ── */
 const SS = {
   currentPage : 'poster',
-  posters     : [],        // { id, src, label, isLocal }
+  posters     : [],        // { id, src, thumbSrc, label, title, caption, noteId, filterId, ts }
   lightboxIdx : 0,
   editingSongIdx : null,
   editingTourId  : null,
@@ -344,43 +344,109 @@ function flashCGNbSaved() {
 /* ══════════════════════════════════════════════════════════
    POSTER — IndexedDB storage
 ══════════════════════════════════════════════════════════ */
-const CG_INDEX_URL = ''; // 填入 GitHub raw URL，例如 https://raw.githubusercontent.com/yourname/repo/main/cg-index.json
+/* ── 照片牆縮圖 ──
+   照片牆顯示的是長邊 640px 的縮圖（存在同一筆紀錄的 thumb 欄位），點開大圖才載原圖。
+   thumb 的三種狀態：Blob＝有縮圖；false＝不需要（原圖本來就小，或是 GIF 這類不重壓的格式）；
+   沒有這個欄位＝還沒算過（舊資料、剛上傳、剛換圖），進頁面後在背景一張一張補。 */
+const POSTER_THUMB_EDGE    = 640;
+const POSTER_THUMB_QUALITY = 0.8;
 
-/* ── IndexedDB helpers ── */
-async function fetchRemotePosters() {
-  if (!CG_INDEX_URL) return [];
-  try {
-    const res = await fetch(CG_INDEX_URL);
-    if (!res.ok) return [];
-    const list = await res.json();
-    return list.map(item => ({ ...item, id: 'remote_' + item.src, isLocal: false }));
-  } catch(e) { return []; }
+// 回傳縮圖 Blob；不需要或做不出來時回傳 false
+async function makePosterThumb(blob) {
+  if (!/^image\/(jpeg|png|webp)$/i.test(blob.type)) return false;
+  let bmp;
+  try { bmp = await createImageBitmap(blob); } catch { return false; }
+  const scale = POSTER_THUMB_EDGE / Math.max(bmp.width, bmp.height);
+  if (scale >= 1) { bmp.close(); return false; }
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.max(1, Math.round(bmp.width  * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  const toBlob = type => new Promise(res => canvas.toBlob(res, type, POSTER_THUMB_QUALITY));
+  let out = await toBlob('image/webp');
+  if (!out || out.type !== 'image/webp') out = await toBlob(blob.type === 'image/png' ? 'image/png' : 'image/jpeg');
+  return out && out.size < blob.size ? out : false;
+}
+
+let _thumbQueue = Promise.resolve();   // 一張一張做，不要同時解碼一堆大圖
+
+function queuePosterThumb(poster) {
+  if (poster.thumbSrc || poster._thumbQueued) return;
+  poster._thumbQueued = true;
+  const { id, src } = poster;
+  _thumbQueue = _thumbQueue.then(async () => {
+    await new Promise(r => setTimeout(r, 0));   // 讓出主執行緒給畫面更新
+    const rec = await idbGet('posters', id);
+    if (!rec || !(rec.blob instanceof Blob)) return;
+    const thumb = await makePosterThumb(rec.blob);
+    // 等待期間照片被刪除或換了圖：這張縮圖已經過期，丟掉
+    const cur = SS.posters.find(p => p.id === id);
+    if (!cur || cur.src !== src) return;
+    await idbPatch('posters', id, { thumb });
+    if (!thumb) return;
+    cur.thumbSrc = setPosterThumbUrl(id, thumb);
+    // 還沒載入的格子直接改用縮圖；已經顯示出來的就不換，免得閃一下
+    const img = document.querySelector(`#poster-grid .poster-cell[data-id="${CSS.escape(id)}"] img`);
+    if (img && !cur.filterId && !(img.complete && img.naturalWidth)) img.src = cur.thumbSrc;
+  }).catch(err => console.warn('poster thumb:', err));
+}
+
+// 套了濾鏡的格子：捲到附近才開始算色
+let _posterIO = null;
+function posterFilterObserver() {
+  if (typeof IntersectionObserver !== 'function') return null;
+  if (!_posterIO) {
+    _posterIO = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (!en.isIntersecting) return;
+        _posterIO.unobserve(en.target);
+        en.target._applyFilter?.();
+      });
+    // root 要指定成實際捲動的容器，rootMargin（提前 600px 開始算）才會生效
+    }, { root: $('site-content'), rootMargin: '600px 0px' });
+  }
+  return _posterIO;
 }
 
 function buildPosterGrid(posters) {
   const grid = $('poster-grid');
   grid.innerHTML = '';
+  const io = posterFilterObserver();
+  io?.disconnect();          // 舊格子已經丟掉，不必再觀察
+  const pending = [];        // 還沒有縮圖的照片
 
   posters.forEach((poster, idx) => {
     const cell = document.createElement('div');
     cell.className = 'poster-cell';
 
+    cell.dataset.id = poster.id;
+
     const img = document.createElement('img');
-    img.src = poster.src;
+    const gridSrc = poster.thumbSrc || poster.src;   // 有縮圖用縮圖
     img.alt = poster.label || '';
     img.draggable = false; // 避免瀏覽器原生的拖曳圖片搶走排序拖曳
-    // 有套濾鏡：先藏起原圖，等套色版算好再顯示，避免閃一下原圖
+    img.decoding = 'async';
     if (poster.filterId && typeof fltFilteredUrl === 'function') {
+      // 有套濾鏡：先不放原圖，等套色版算好再顯示，避免閃一下原圖。
+      // 捲到附近才算，照片很多時不必一進頁面就全部算完。
       img.style.visibility = 'hidden';
-      fltFilteredUrl(poster.src, poster.filterId, FILTER_GRID_EDGE)
-        .then(u => { img.src = u; }, () => {})
-        .finally(() => { img.style.visibility = ''; });
+      cell._applyFilter = () => {
+        fltFilteredUrl(gridSrc, poster.filterId, FILTER_GRID_EDGE)
+          .then(u => { img.src = u; }, () => { img.src = gridSrc; })
+          .finally(() => { img.style.visibility = ''; });
+      };
+      if (io) io.observe(cell); else cell._applyFilter();
+    } else {
+      img.loading = 'lazy';   // 捲到附近才載入；要在指定 src 之前設定
+      img.src = gridSrc;
     }
+    if (!poster.thumbSrc) pending.push(poster);
 
     const overlay = document.createElement('div');
     overlay.className = 'poster-cell-overlay';
 
-    // 刪除按鈕（hover 時顯示，僅本機圖片）
+    // 編輯按鈕（hover 時顯示）
     const editBtn = document.createElement('button');
     editBtn.className = 'poster-edit-btn';
     editBtn.textContent = '✎';
@@ -391,12 +457,11 @@ function buildPosterGrid(posters) {
     cell.appendChild(img);
     cell.appendChild(overlay);
     cell.addEventListener('click', () => { if (!_posterSuppressClick) openLightbox(idx); });
-    if (poster.isLocal) {
-      cell.dataset.idx = idx;
-      cell.addEventListener('mousedown', e => onPosterMouseDown(e, idx));
-    }
+    cell.dataset.idx = idx;
+    cell.addEventListener('mousedown', e => onPosterMouseDown(e, idx));
     grid.appendChild(cell);
   });
+  pending.forEach(queuePosterThumb);
 
   const addCell = document.createElement('div');
   addCell.className = 'poster-add-cell';
@@ -411,18 +476,20 @@ function buildPosterGrid(posters) {
 let _posterOrderSave = Promise.resolve();
 
 function persistPosterOrder() {
-  const local = SS.posters.filter(p => p.isLocal);
-  if (!local.length) return;
-  const base = Math.min(...local.map(p => (typeof p.ts === 'number' ? p.ts : Date.now())));
-  local.forEach((p, i) => { p.ts = base + i; });
-  const wanted = new Map(local.map(p => [p.id, p.ts]));
+  const list = SS.posters;
+  if (!list.length) return;
+  const base = Math.min(...list.map(p => (typeof p.ts === 'number' ? p.ts : Date.now())));
+  const changed = [];
+  list.forEach((p, i) => {
+    if (p.ts === base + i) return;
+    p.ts = base + i;
+    changed.push({ id: p.id, ts: p.ts });
+  });
+  if (!changed.length) return;
   // 串成一條佇列，連續快速調整時後一次的寫入一定蓋在前一次之後
-  _posterOrderSave = _posterOrderSave.then(async () => {
-    const records = await idbGetAllPosters();
-    await Promise.all(records
-      .filter(rec => wanted.has(rec.id) && rec.ts !== wanted.get(rec.id))
-      .map(rec => idbPutPoster({ ...rec, ts: wanted.get(rec.id) })));
-  }).catch(err => { console.warn('poster order save:', err); notifyStorageError(err, 'media'); });
+  _posterOrderSave = _posterOrderSave
+    .then(() => Promise.all(changed.map(c => idbPatch('posters', c.id, { ts: c.ts }))))
+    .catch(err => { console.warn('poster order save:', err); notifyStorageError(err, 'media'); });
 }
 
 // 把 from 位置的照片移到 target 照片的前面或後面
@@ -491,7 +558,7 @@ function igModalMove(delta) {
   const i = SS.lightboxIdx;
   const j = i + delta;
   const a = SS.posters[i], b = SS.posters[j];
-  if (!a?.isLocal || !b?.isLocal) return;
+  if (!a || !b) return;
   [SS.posters[i], SS.posters[j]] = [b, a];
   SS.lightboxIdx = j;
   persistPosterOrder();
@@ -502,10 +569,9 @@ function igModalMove(delta) {
 function igModalUpdateMoveBtns() {
   const i = SS.lightboxIdx;
   const cur = SS.posters[i];
-  const canMove = d => !!(cur?.isLocal && SS.posters[i + d]?.isLocal);
+  const canMove = d => !!(cur && SS.posters[i + d]);
   $('ig-modal-move-prev').disabled = !canMove(-1);
   $('ig-modal-move-next').disabled = !canMove(1);
-  $('ig-modal-move').style.visibility = cur?.isLocal ? '' : 'hidden';
 }
 
 $('ig-modal-move-prev').addEventListener('click', () => igModalMove(-1));
@@ -516,7 +582,7 @@ $('ig-modal-move-next').addEventListener('click', () => igModalMove(1));
 function posterTs(rec) {
   if (typeof rec.ts === 'number') return rec.ts;
   const ts = typeof rec.blob.lastModified === 'number' ? rec.blob.lastModified : 0;
-  idbPutPoster({ ...rec, ts }).catch(err => console.warn('poster ts backfill:', err));
+  idbPatch('posters', rec.id, { ts }).catch(err => console.warn('poster ts backfill:', err));
   return ts;
 }
 
@@ -524,34 +590,30 @@ async function renderPoster() {
   const grid = $('poster-grid');
   grid.innerHTML = `<div style="padding:40px;color:var(--c-hint);text-align:center;grid-column:1/-1">${esc(t('msg.loading'))}</div>`;
 
-  const [remote, localRecords] = await Promise.all([
-    fetchRemotePosters(),
-    idbGetAllPosters(),
-  ]);
+  const records = await idbGetAllPosters();
 
-  // 本機圖片：從 blob 建立 objectURL（跳過 blob 遺失的記錄），依上傳時間 ts 由舊到新排。
+  // 從 blob 建立 objectURL（跳過 blob 遺失的記錄），依上傳時間 ts 由舊到新排。
   // IDB 的 getAll 是照主鍵排，而主鍵是隨機 UUID，不排序的話每次重新整理順序都不一樣。
-  const local = localRecords
+  SS.posters = records
     .filter(rec => rec.blob instanceof Blob)
     .map(rec => ({ rec, ts: posterTs(rec) }))
     .sort((a, b) => a.ts - b.ts || (a.rec.id < b.rec.id ? -1 : 1))
     .map(({ rec, ts }) => ({
       id      : rec.id,
       src     : getPosterObjectUrl(rec),
+      // 有縮圖用縮圖；thumb === false 代表原圖夠小、不需要縮圖，直接用原圖
+      thumbSrc: rec.thumb instanceof Blob
+        ? (_posterThumbUrlCache.get(rec.id) || setPosterThumbUrl(rec.id, rec.thumb))
+        : (rec.thumb === false ? getPosterObjectUrl(rec) : ''),
       label   : rec.label || '',
       title   : rec.title || '',
       caption : rec.caption || '',
       noteId  : rec.noteId || rec.folderId || '',
       filterId: rec.filterId || '',
       ts,
-      isLocal : true,
     }));
 
-  const remoteIds = new Set(remote.map(p => p.id));
-  const merged = [...remote, ...local.filter(p => !remoteIds.has(p.id))];
-  SS.posters = merged;
-
-  buildPosterGrid(merged);
+  buildPosterGrid(SS.posters);
 }
 
 // 將資料夾以階層樹狀填入 select（共用：海報 / IG / 巡演 modal）
@@ -642,7 +704,7 @@ function addPosterFile(file, { title = '', caption = '', noteId = '' } = {}) {
   const src = URL.createObjectURL(file);
   _posterUrlCache.set(id, src);
   const ts  = Date.now();
-  SS.posters.push({ id, src, title, caption, noteId, filterId: '', label: file.name, ts, isLocal: true });
+  SS.posters.push({ id, src, thumbSrc: '', title, caption, noteId, filterId: '', label: file.name, ts });
   idbPutPoster({ id, blob: file, title, caption, noteId, filterId: '', label: file.name, ts }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
 }
 
@@ -704,12 +766,14 @@ $('pm-save').addEventListener('click', async () => {
         const src = URL.createObjectURL(_pmFile);
         _posterUrlCache.set(_pmPosterId, src);
         SS.posters[idx].src = src;
+        // 換了圖，舊縮圖作廢；新紀錄沒有 thumb 欄位，重繪時會在背景重算
+        dropPosterThumbUrl(_pmPosterId);
+        SS.posters[idx].thumbSrc = '';
+        SS.posters[idx]._thumbQueued = false;
         // 換圖不換位置：沿用原本的 ts
         idbPutPoster({ id: _pmPosterId, blob: _pmFile, title, caption, noteId, filterId: SS.posters[idx].filterId || '', label: _pmFile.name, ts: SS.posters[idx].ts ?? Date.now() }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
       } else {
-        const records = await idbGetAllPosters();
-        const rec = records.find(r => r.id === _pmPosterId);
-        if (rec) idbPutPoster({ ...rec, title, caption, noteId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+        idbPatch('posters', _pmPosterId, { title, caption, noteId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
       }
     }
   }
@@ -718,17 +782,46 @@ $('pm-save').addEventListener('click', async () => {
   buildPosterGrid(SS.posters);
 });
 
+// 刪除一張照片，並給幾秒鐘的復原機會。
+// 先把紀錄複製到記憶體再刪：紀錄刪掉後，從 IDB 讀出的 Blob 參照不保證在每個瀏覽器都還有效。
+async function deletePosterById(id) {
+  const poster = SS.posters.find(p => p.id === id);
+  if (!poster) return;
+  let keep = null;
+  try {
+    const rec = stripDerivedFields(await idbGet('posters', id));
+    if (rec?.blob instanceof Blob) {
+      keep = { ...rec, blob: new Blob([await rec.blob.arrayBuffer()], { type: rec.blob.type }) };
+    }
+  } catch (err) { console.warn('poster undo snapshot:', err); }
+
+  await idbDeletePoster(id);
+  if (_posterUrlCache.has(id)) {
+    URL.revokeObjectURL(_posterUrlCache.get(id));
+    _posterUrlCache.delete(id);
+  }
+  dropPosterThumbUrl(id);
+  const idx = SS.posters.findIndex(p => p.id === id);
+  if (idx !== -1) SS.posters.splice(idx, 1);
+  buildPosterGrid(SS.posters);
+
+  if (!keep || typeof showUndoToast !== 'function') return;
+  showUndoToast(t('undo.photo'), async () => {
+    if (SS.posters.some(p => p.id === id)) return;
+    await idbPutPoster(keep);
+    const src = URL.createObjectURL(keep.blob);
+    _posterUrlCache.set(id, src);
+    const at = Math.min(Math.max(idx, 0), SS.posters.length);
+    SS.posters.splice(at, 0, { ...poster, src, thumbSrc: '', _thumbQueued: false });
+    buildPosterGrid(SS.posters);
+  });
+}
+
 $('pm-del').addEventListener('click', async () => {
   if (_pmPosterId === null) return;
-  if (_posterUrlCache.has(_pmPosterId)) {
-    URL.revokeObjectURL(_posterUrlCache.get(_pmPosterId));
-    _posterUrlCache.delete(_pmPosterId);
-  }
-  await idbDeletePoster(_pmPosterId);
-  const idx = SS.posters.findIndex(p => p.id === _pmPosterId);
-  if (idx !== -1) SS.posters.splice(idx, 1);
+  const id = _pmPosterId;
   $('poster-modal-overlay').classList.remove('open');
-  buildPosterGrid(SS.posters);
+  await deletePosterById(id);
 });
 
 // 顯示/隱藏「已連結章節」chip（海報 modal 與 IG modal 共用）
@@ -886,27 +979,16 @@ $('ig-modal-save').addEventListener('click', async () => {
   const noteId  = $('ig-modal-folder').value;  // 現在存的是 folderId
   const filterId = typeof fltIgSelected === 'function' ? fltIgSelected() : (poster.filterId || '');
   SS.posters[idx] = { ...poster, caption, noteId, filterId };
-  if (poster.isLocal) {
-    const records = await idbGetAllPosters();
-    const rec = records.find(r => r.id === poster.id);
-    if (rec) idbPutPoster({ ...rec, caption, noteId, filterId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
-  }
+  idbPatch('posters', poster.id, { caption, noteId, filterId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
   closeIgModal();
   buildPosterGrid(SS.posters);
 });
 
 $('ig-modal-del').addEventListener('click', async () => {
-  const idx = SS.lightboxIdx;
-  const poster = SS.posters[idx];
+  const poster = SS.posters[SS.lightboxIdx];
   if (!poster) return;
-  if (_posterUrlCache.has(poster.id)) {
-    URL.revokeObjectURL(_posterUrlCache.get(poster.id));
-    _posterUrlCache.delete(poster.id);
-  }
-  if (poster.isLocal) await idbDeletePoster(poster.id);
-  SS.posters.splice(idx, 1);
   closeIgModal();
-  buildPosterGrid(SS.posters);
+  await deletePosterById(poster.id);
 });
 
 document.addEventListener('keydown', e => {

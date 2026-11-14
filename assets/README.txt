@@ -1,21 +1,12 @@
-【預設資源放置說明】
+【assets 資料夾說明】
 
 assets/
 |
-|-- avatar-char.jpg         <- 角色頭像（右上角 avatarChar）
-|-- bg-slot.jpg             <- 對話視窗背景（右上角 bg-slot）
-|
-|-- photo-1.jpg             <- PHOTO 頁面 預設照片 1
-|-- photo-2.jpg             <- PHOTO 頁面 預設照片 2
-|-- photo-3.jpg             <- PHOTO 頁面 預設照片 3
-|
-|-- member-kazo.jpg         <- Profile KAZO 照片
-|-- member-javy.jpg         <- Profile Javy 照片
-|-- member-ace.jpg          <- Profile ACE 照片
-|
-|-- cover-song1.jpg         <- 音樂封面（照歌曲順序命名，song2, song3...）
+|-- filter-sample.jpg       <- Photo 頁「濾鏡提示詞」面板的範例圖（filter.js 的 FILTER_SAMPLE）
+|-- luts/                   <- （選用）預設濾鏡的 .cube 檔，需在 filter.js 的 FILTER_PRESETS 登記
 
 【注意】
-- 圖片格式：jpg / png / webp 皆可
-- 音樂 MP3 直接使用 YouTube / Spotify URL，不需放入此資料夾
-- 放好圖片後通知 Claude 進行程式碼串接
+- 頭像、背景、照片、成員照片、歌曲封面與 MP3 都是在網站裡上傳，存在瀏覽器的
+  IndexedDB，不放在這個資料夾。
+- 想換範例圖：用同檔名覆蓋 filter-sample.jpg 即可，長邊 480px 左右就夠
+  （面板上只顯示 220px 的預覽）。

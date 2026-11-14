@@ -372,7 +372,7 @@
   
   <div id="mid-header">
     <span id="mid-header-title" data-i18n="mid.defaultTitle">未歸類故事</span>
-    <button id="msg-search-btn" class="icon-btn" title="搜尋訊息" data-i18n-title="search.open" aria-label="搜尋訊息" data-i18n-aria="search.open">
+    <button id="msg-search-btn" class="icon-btn" title="搜尋訊息（Ctrl+F）" data-i18n-title="search.open" aria-label="搜尋訊息（Ctrl+F）" data-i18n-aria="search.open">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
     </button>
   </div>
@@ -446,6 +446,21 @@
   </div>
 </div>
 
+<!-- ── 拖放匯入：檔案拖進視窗時的提示 ─────────────────── -->
+<div id="drop-overlay" aria-hidden="true">
+  <div class="drop-overlay-box">
+    <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+    <div data-i18n="imp.dropHint">放開以匯入 .txt 對話紀錄</div>
+  </div>
+</div>
+
+<!-- ── 刪除後的復原提示條 ─────────────────────────────── -->
+<div id="undo-toast" role="status" aria-live="polite">
+  <span id="undo-toast-text"></span>
+  <button type="button" id="undo-toast-btn" data-i18n="undo.action">復原</button>
+  <button type="button" id="undo-toast-close" aria-label="關閉" data-i18n-aria="a11y.close">✕</button>
+</div>
+
 <!-- ── Modal ───────────────────────────────────────────── -->
 <div id="modal-overlay">
   <div class="modal-box" id="modal-box">
@@ -497,6 +512,14 @@
           <button id="set-font-dec" class="btn-modern" style="width:64px; justify-content:center; padding:8px 0; border:1px solid var(--c-primary-border); background:transparent; color:var(--c-text-mute);">A-</button>
           <div id="set-font-scale-label" style="flex:1; text-align:center; font-size:13px; font-weight:700; color:var(--c-text);">100%</div>
           <button id="set-font-inc" class="btn-modern" style="width:64px; justify-content:center; padding:8px 0;">A+</button>
+        </div>
+      </div>
+      <div>
+        <label style="color: var(--c-text-mute); display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500;" data-i18n="settings.storage">儲存空間</label>
+        <div class="storage-info">
+          <div id="storage-usage"></div>
+          <div id="storage-state" class="storage-state"></div>
+          <button id="storage-protect-btn" class="btn-modern storage-protect-btn" type="button" data-i18n="storage.protect" hidden>申請保護</button>
         </div>
       </div>
     </div>

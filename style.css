@@ -24,6 +24,8 @@
   --z-modal           : 10000;
   --z-menu            : 10001; /* 內容選單需蓋過彈窗，故在其上 */
   --z-trash-confirm   : 10002; /* 刪除訊息的小確認框，貼在垃圾桶上方 */
+  --z-undo-toast      : 10003; /* 刪除後的復原提示條 */
+  --z-drop-overlay    : 10004; /* 檔案拖進視窗時的匯入提示 */
   --z-tour-modal      : 10010;
   --z-guide           : 10020; /* Story Mode 新手導覽，蓋過其他一切 */
 }
@@ -3497,3 +3499,96 @@ body.poster-dragging, body.poster-dragging * { cursor: grabbing !important; }
 }
 .ig-modal-move-btn:hover:not(:disabled) { color: var(--c-text); border-color: var(--c-accent); }
 .ig-modal-move-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ── 刪除後的復原提示條 ─────────────────────────────────── */
+#undo-toast {
+  position: fixed;
+  /* 左右貼齊再用 margin 置中：用 left:50% 的話寬度會被限制在半個螢幕，手機上字會擠成一直條 */
+  left: 16px;
+  right: 16px;
+  margin: 0 auto;
+  width: fit-content;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-undo-toast);
+  display: none;
+  align-items: center;
+  gap: 12px;
+  max-width: min(480px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 10px 10px 16px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  border: 1px solid rgb(var(--c-text-rgb) / 0.16);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+#undo-toast.show { display: flex; animation: undoToastIn 0.18s ease-out; }
+#undo-toast-text { min-width: 0; overflow-wrap: anywhere; }
+#undo-toast-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#undo-toast-btn:hover { background: rgb(var(--c-text-rgb) / 0.08); }
+#undo-toast-close {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-mute);
+  font-size: 12px;
+  cursor: pointer;
+}
+#undo-toast-close:hover { color: var(--c-text); background: rgb(var(--c-text-rgb) / 0.08); }
+@keyframes undoToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #undo-toast.show { animation: none; }
+}
+
+/* ── 系統設定：儲存空間 ─────────────────────────────────── */
+.storage-info { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.6; color: var(--c-text); }
+.storage-state { color: var(--c-text-mute); }
+.storage-state.warn { color: rgb(var(--c-danger-rgb)); }
+.storage-protect-btn { align-self: flex-start; width: auto; padding: 6px 14px; font-size: 12.5px; }
+.storage-protect-btn[hidden] { display: none; }
+#undo-toast-btn[hidden] { display: none; }
+
+/* ── 拖放匯入提示 ───────────────────────────────────────── */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drop-overlay);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(var(--c-bg-rgb) / 0.82);
+  pointer-events: none;   /* 只是提示，不能擋住底下的拖放事件 */
+}
+body.file-dragging #drop-overlay { display: flex; }
+.drop-overlay-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 56px;
+  border: 2px dashed var(--c-accent);
+  border-radius: var(--radius-xl);
+  color: var(--c-text);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+.drop-overlay-box svg { color: var(--c-accent); }
