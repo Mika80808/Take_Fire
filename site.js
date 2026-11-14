@@ -110,7 +110,9 @@ function renderSitePage(page) {
   if (nextPage === 'about')  renderAbout();
   const fab = $('cg-nb-fab');
   if (fab) fab.style.display = (nextPage === 'poster') ? 'flex' : 'none';
-  if (nextPage !== 'poster') closeCGNotebook();
+  const fltFab = $('flt-fab');
+  if (fltFab) fltFab.style.display = (nextPage === 'poster') ? 'flex' : 'none';
+  if (nextPage !== 'poster') { closeCGNotebook(); if (typeof closeFilterPanel === 'function') closeFilterPanel(); }
   saveSite();
 }
 
@@ -367,6 +369,13 @@ function buildPosterGrid(posters) {
     img.src = poster.src;
     img.alt = poster.label || '';
     img.draggable = false; // 避免瀏覽器原生的拖曳圖片搶走排序拖曳
+    // 有套濾鏡：先藏起原圖，等套色版算好再顯示，避免閃一下原圖
+    if (poster.filterId && typeof fltFilteredUrl === 'function') {
+      img.style.visibility = 'hidden';
+      fltFilteredUrl(poster.src, poster.filterId, FILTER_GRID_EDGE)
+        .then(u => { img.src = u; }, () => {})
+        .finally(() => { img.style.visibility = ''; });
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'poster-cell-overlay';
@@ -533,6 +542,7 @@ async function renderPoster() {
       title   : rec.title || '',
       caption : rec.caption || '',
       noteId  : rec.noteId || rec.folderId || '',
+      filterId: rec.filterId || '',
       ts,
       isLocal : true,
     }));
@@ -626,12 +636,25 @@ async function compressImage(file, maxEdge = IMG_MAX_EDGE, quality = IMG_QUALITY
   return new File([out], file.name.replace(/\.[^.]+$/, '') + ext, { type: out.type });
 }
 
+// 新增一張本機照片（上傳視窗與直接貼上共用），file 需已壓縮過
+function addPosterFile(file, { title = '', caption = '', noteId = '' } = {}) {
+  const id  = uid();
+  const src = URL.createObjectURL(file);
+  _posterUrlCache.set(id, src);
+  const ts  = Date.now();
+  SS.posters.push({ id, src, title, caption, noteId, filterId: '', label: file.name, ts, isLocal: true });
+  idbPutPoster({ id, blob: file, title, caption, noteId, filterId: '', label: file.name, ts }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+}
+
 $('pm-upload-area').addEventListener('click', () => $('pm-file-input').click());
 let _pmPickSeq = 0;
-$('pm-file-input').addEventListener('change', async e => {
+$('pm-file-input').addEventListener('change', e => {
   const file = e.target.files[0];
   e.target.value = '';
-  if (!file) return;
+  if (file) pmSetFile(file);
+});
+
+async function pmSetFile(file) {
   const seq = ++_pmPickSeq;
   const stored = await compressImage(file);
   if (seq !== _pmPickSeq) return; // 使用者已改選其他圖片
@@ -641,6 +664,27 @@ $('pm-file-input').addEventListener('change', async e => {
   preview.src = url;
   preview.style.display = 'block';
   $('pm-placeholder').style.display = 'none';
+}
+
+// Photo 頁直接 Ctrl+V 貼上圖片（例如在 GPT 對圖片按右鍵「複製圖片」）即新增；
+// 上傳視窗開著時則當作選圖
+document.addEventListener('paste', async e => {
+  if (!document.body.classList.contains('site-mode') || SS.currentPage !== 'poster') return;
+  if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if ($('ig-modal-overlay').classList.contains('open') || $('modal-overlay').style.display === 'flex') return;
+  if ($('flt-overlay')?.classList.contains('open')) return;
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  if ($('poster-modal-overlay').classList.contains('open')) { pmSetFile(files[0]); return; }
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
+  for (const [i, f] of files.entries()) {
+    const named = /^image\.\w+$/i.test(f.name) || !f.name
+      ? new File([f], `CG_${stamp}${files.length > 1 ? '_' + (i + 1) : ''}.${(f.type.split('/')[1] || 'png')}`, { type: f.type })
+      : f;
+    addPosterFile(await compressImage(named));
+  }
+  buildPosterGrid(SS.posters);
 });
 
 $('pm-save').addEventListener('click', async () => {
@@ -650,12 +694,7 @@ $('pm-save').addEventListener('click', async () => {
 
   if (_pmPosterId === null) {
     if (!_pmFile) return;
-    const id  = uid();
-    const src = URL.createObjectURL(_pmFile);
-    _posterUrlCache.set(id, src);
-    const ts  = Date.now();
-    SS.posters.push({ id, src, title, caption, noteId, label: _pmFile.name, ts, isLocal: true });
-    idbPutPoster({ id, blob: _pmFile, title, caption, noteId, label: _pmFile.name, ts }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+    addPosterFile(_pmFile, { title, caption, noteId });
   } else {
     const idx = SS.posters.findIndex(p => p.id === _pmPosterId);
     if (idx !== -1) {
@@ -666,7 +705,7 @@ $('pm-save').addEventListener('click', async () => {
         _posterUrlCache.set(_pmPosterId, src);
         SS.posters[idx].src = src;
         // 換圖不換位置：沿用原本的 ts
-        idbPutPoster({ id: _pmPosterId, blob: _pmFile, title, caption, noteId, label: _pmFile.name, ts: SS.posters[idx].ts ?? Date.now() }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+        idbPutPoster({ id: _pmPosterId, blob: _pmFile, title, caption, noteId, filterId: SS.posters[idx].filterId || '', label: _pmFile.name, ts: SS.posters[idx].ts ?? Date.now() }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
       } else {
         const records = await idbGetAllPosters();
         const rec = records.find(r => r.id === _pmPosterId);
@@ -777,10 +816,16 @@ function igModalUpdateChapterBtn(folderId) {
   showChapterChip({ tag: 'ig-chapter-tag', sel: 'ig-modal-folder', link: 'ig-modal-chapter' }, _igFolderById(folderId));
 }
 
+// 大圖與濾鏡縮圖列（filter.js）；filter.js 尚未載入時直接顯示原圖
+function igModalShowImage(poster) {
+  if (typeof fltIgShow === 'function') fltIgShow(poster);
+  else $('ig-modal-img').src = poster.src;
+}
+
 function openLightbox(idx) {
   SS.lightboxIdx = idx;
   const poster = SS.posters[idx];
-  $('ig-modal-img').src = poster.src;
+  igModalShowImage(poster);
   $('ig-modal-caption').value = poster.caption || '';
   igModalFillFolders(poster.noteId || '');
   igModalUpdateChapterBtn(poster.noteId || '');
@@ -797,7 +842,7 @@ function openLightbox(idx) {
 function igModalNav(delta) {
   SS.lightboxIdx = (SS.lightboxIdx + delta + SS.posters.length) % SS.posters.length;
   const poster = SS.posters[SS.lightboxIdx];
-  $('ig-modal-img').src = poster.src;
+  igModalShowImage(poster);
   $('ig-modal-caption').value = poster.caption || '';
   igModalFillFolders(poster.noteId || '');
   igModalUpdateChapterBtn(poster.noteId || '');
@@ -839,11 +884,12 @@ $('ig-modal-save').addEventListener('click', async () => {
   if (!poster) return;
   const caption = $('ig-modal-caption').value.trim();
   const noteId  = $('ig-modal-folder').value;  // 現在存的是 folderId
-  SS.posters[idx] = { ...poster, caption, noteId };
+  const filterId = typeof fltIgSelected === 'function' ? fltIgSelected() : (poster.filterId || '');
+  SS.posters[idx] = { ...poster, caption, noteId, filterId };
   if (poster.isLocal) {
     const records = await idbGetAllPosters();
     const rec = records.find(r => r.id === poster.id);
-    if (rec) idbPutPoster({ ...rec, caption, noteId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
+    if (rec) idbPutPoster({ ...rec, caption, noteId, filterId }).catch(err => { console.warn('IDB write:', err); notifyStorageError(err, 'media'); });
   }
   closeIgModal();
   buildPosterGrid(SS.posters);
