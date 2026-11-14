@@ -446,6 +446,13 @@
   </div>
 </div>
 
+<!-- ── 刪除後的復原提示條 ─────────────────────────────── -->
+<div id="undo-toast" role="status" aria-live="polite">
+  <span id="undo-toast-text"></span>
+  <button type="button" id="undo-toast-btn" data-i18n="undo.action">復原</button>
+  <button type="button" id="undo-toast-close" aria-label="關閉" data-i18n-aria="a11y.close">✕</button>
+</div>
+
 <!-- ── Modal ───────────────────────────────────────────── -->
 <div id="modal-overlay">
   <div class="modal-box" id="modal-box">
@@ -497,6 +504,14 @@
           <button id="set-font-dec" class="btn-modern" style="width:64px; justify-content:center; padding:8px 0; border:1px solid var(--c-primary-border); background:transparent; color:var(--c-text-mute);">A-</button>
           <div id="set-font-scale-label" style="flex:1; text-align:center; font-size:13px; font-weight:700; color:var(--c-text);">100%</div>
           <button id="set-font-inc" class="btn-modern" style="width:64px; justify-content:center; padding:8px 0;">A+</button>
+        </div>
+      </div>
+      <div>
+        <label style="color: var(--c-text-mute); display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500;" data-i18n="settings.storage">儲存空間</label>
+        <div class="storage-info">
+          <div id="storage-usage"></div>
+          <div id="storage-state" class="storage-state"></div>
+          <button id="storage-protect-btn" class="btn-modern storage-protect-btn" type="button" data-i18n="storage.protect" hidden>申請保護</button>
         </div>
       </div>
     </div>

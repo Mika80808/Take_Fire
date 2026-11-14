@@ -126,6 +126,27 @@ async function idbDelete(store, key) {
   });
 }
 
+// 讀出一筆、合併欄位、寫回，全在同一個交易裡完成。
+// 多處各改同一筆紀錄的不同欄位（說明、排序、縮圖）時，不會互相蓋掉對方剛寫的值。
+// 紀錄不存在時不寫入，回傳 null。
+async function idbPatch(store, key, patch) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    let next = null;
+    const req = os.get(key);
+    req.onsuccess = () => {
+      if (!req.result) return;
+      next = { ...req.result, ...patch };
+      os.put(next);
+    };
+    tx.oncomplete = () => resolve(next);
+    tx.onerror    = e => reject(e.target.error);
+    tx.onabort    = e => reject(e.target.error || new Error('tx aborted'));
+  });
+}
+
 const idbGetAllPosters = () => idbGetAll('posters');
 const idbPutPoster     = (record) => idbPut('posters', record);
 const idbDeletePoster  = (id) => idbDelete('posters', id);
@@ -138,6 +159,31 @@ function getPosterObjectUrl(record) {
   const url = URL.createObjectURL(record.blob);
   _posterUrlCache.set(record.id, url);
   return url;
+}
+
+/* ── Poster 縮圖 objectURL cache ──
+   縮圖（紀錄上的 thumb 欄位）是從原圖算出來的衍生資料：照片牆用它，大圖才載原圖。
+   不進備份，遺失或換圖後由 site.js 在背景重算。 */
+const _posterThumbUrlCache = new Map(); // id → objectURL
+
+function setPosterThumbUrl(id, blob) {
+  dropPosterThumbUrl(id);
+  const url = URL.createObjectURL(blob);
+  _posterThumbUrlCache.set(id, url);
+  return url;
+}
+
+function dropPosterThumbUrl(id) {
+  if (!_posterThumbUrlCache.has(id)) return;
+  URL.revokeObjectURL(_posterThumbUrlCache.get(id));
+  _posterThumbUrlCache.delete(id);
+}
+
+// 匯出與回滾快照共用：剝掉可重算的衍生欄位
+function stripDerivedFields(rec) {
+  if (!rec || typeof rec !== 'object' || !('thumb' in rec)) return rec;
+  const { thumb, ...rest } = rec;
+  return rest;
 }
 
 /* ── App Asset IDB helpers ── */
@@ -602,6 +648,8 @@ function getBackupState() {
 // 不會讓每次存檔都多付一次寫入成本。
 function markDataChanged() {
   const st = getBackupState();
+  // 開始有自己的資料了：順便請瀏覽器別自動清掉（每次啟動最多問一次）
+  requestStoragePersist();
   if (st.dirty) return;
   st.dirty = true;
   persistBackupState();
@@ -653,6 +701,48 @@ function snoozeBackupReminder() {
   hideBackupReminder();
 }
 
+/* ══════════════════════════════════════════════════════════
+   儲存空間保護
+   資料全在瀏覽器裡。預設情況下磁碟空間吃緊時瀏覽器可以自行清掉網站資料；
+   申請「持久保存」後就只有使用者自己清除才會消失。
+══════════════════════════════════════════════════════════ */
+let _persistAsked = false;
+
+// 回傳 true / false；瀏覽器不支援時回傳 null
+async function storageIsPersisted() {
+  try {
+    if (!navigator.storage?.persisted) return null;
+    return await navigator.storage.persisted();
+  } catch (_) { return null; }
+}
+
+// force=false：每次啟動最多問一次（部分瀏覽器會跳出詢問視窗，不要反覆打擾）
+async function requestStoragePersist(force = false) {
+  try {
+    if (!navigator.storage?.persist) return null;
+    if (await navigator.storage.persisted()) return true;
+    if (_persistAsked && !force) return false;
+    _persistAsked = true;
+    return await navigator.storage.persist();
+  } catch (_) { return null; }
+}
+
+// { usage, quota }（位元組）；不支援時回傳 null
+async function storageEstimate() {
+  try {
+    if (!navigator.storage?.estimate) return null;
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    return { usage, quota };
+  } catch (_) { return null; }
+}
+
+function formatBytes(n) {
+  if (!(n > 0)) return '0 MB';
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
 async function exportAllData() {
   saveNow();
   // 紀錄裡的 Blob 換成 { file, type, size } 指向 zip 內的媒體檔
@@ -660,7 +750,8 @@ async function exportAllData() {
   const media = [];
   for (const name of IMPORT_STORES) {
     const records = await idbGetAll(name);
-    idb[name] = records.map((rec, i) => {
+    idb[name] = records.map((raw, i) => {
+      const rec = stripDerivedFields(raw);
       if (!(rec?.blob instanceof Blob)) return rec;
       const type = rec.blob.type || 'application/octet-stream';
       const file = `media/${name}/${i}.${MEDIA_EXT[type] || 'bin'}`;
@@ -774,7 +865,7 @@ async function prepareStoreRecords(idbData, stores, resolveFile) {
 async function snapshotStores(stores) {
   const snap = {};
   for (const name of stores) {
-    const records = await idbGetAll(name);
+    const records = (await idbGetAll(name)).map(stripDerivedFields);
     for (let i = 0; i < records.length; i++) {
       const b = records[i]?.blob;
       if (b instanceof Blob) records[i] = { ...records[i], blob: new Blob([await b.arrayBuffer()], { type: b.type }) };
@@ -903,6 +994,20 @@ const I18N = {
     'settings.font.rounded': '圓體',
     'settings.fontSize': '字體大小',
     'settings.done': '完成',
+    'settings.storage': '儲存空間',
+    'storage.loading': '讀取中…',
+    'storage.usage': '已使用 %s，瀏覽器上限約 %s',
+    'storage.usageUnknown': '此瀏覽器無法取得用量',
+    'storage.persisted': '已受保護：瀏覽器不會自動清除這裡的資料',
+    'storage.notPersisted': '未受保護：裝置空間不足時，瀏覽器可能自動清除資料',
+    'storage.unsupported': '此瀏覽器不支援資料保護，請定期匯出備份',
+    'storage.protect': '申請保護',
+    'storage.denied': '瀏覽器這次沒有同意。把本頁加入書籤或多使用幾次後再試，並記得定期匯出備份。',
+    'undo.action': '復原',
+    'undo.msgs': '已刪除 %s 則訊息',
+    'undo.folder': '已刪除資料夾「%s」',
+    'undo.photo': '已刪除照片',
+    'undo.failed': '復原失敗',
     'theme.jazz': 'Jazz (深色)',
     'theme.love': 'Love song (粉色)',
     'theme.white': 'White Noise (淺色)',
@@ -1024,7 +1129,7 @@ const I18N = {
     'msg.editingFor': '正在編輯 %s 的對話：',
     'msg.confirmDelete': '確認刪除',
     'msg.deleteN': '確定要刪除選取的 %s 則訊息嗎？\n此操作無法復原。',
-    'trash.confirm': '刪除這 %s 則訊息？無法復原。',
+    'trash.confirm': '刪除這 %s 則訊息？',
     'trash.confirmFolder': '刪除資料夾「%s」？裡面的訊息會回到未歸類。',
     'trash.folderChildrenNote': '子資料夾會移到最上層。',
     'trash.deleteFolder': '刪除「%s」',
@@ -1200,6 +1305,20 @@ const I18N = {
     'settings.font.rounded': 'Rounded',
     'settings.fontSize': 'Font Size',
     'settings.done': 'Done',
+    'settings.storage': 'Storage',
+    'storage.loading': 'Checking…',
+    'storage.usage': '%s used, browser limit about %s',
+    'storage.usageUnknown': 'This browser does not report usage',
+    'storage.persisted': 'Protected: the browser will not clear this data on its own',
+    'storage.notPersisted': 'Not protected: the browser may clear this data when the device runs low on space',
+    'storage.unsupported': 'This browser cannot protect site data. Export backups regularly.',
+    'storage.protect': 'Protect my data',
+    'storage.denied': 'The browser did not agree this time. Bookmark this page or use it a few more times, then try again, and keep exporting backups.',
+    'undo.action': 'Undo',
+    'undo.msgs': 'Deleted %s message(s)',
+    'undo.folder': 'Deleted folder “%s”',
+    'undo.photo': 'Photo deleted',
+    'undo.failed': 'Could not undo',
     'theme.jazz': 'Jazz (Dark)',
     'theme.love': 'Love Song (Pink)',
     'theme.white': 'White Noise (Light)',
@@ -1321,7 +1440,7 @@ const I18N = {
     'msg.editingFor': 'Editing %s’s message:',
     'msg.confirmDelete': 'Confirm delete',
     'msg.deleteN': 'Delete %s selected message(s)?\nThis cannot be undone.',
-    'trash.confirm': 'Delete %s message(s)? This can’t be undone.',
+    'trash.confirm': 'Delete %s message(s)?',
     'trash.confirmFolder': 'Delete folder “%s”? Its messages return to Uncategorized.',
     'trash.folderChildrenNote': ' Sub-folders move to the top level.',
     'trash.deleteFolder': 'Delete “%s”',

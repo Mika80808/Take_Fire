@@ -1285,12 +1285,62 @@ function closeDeletePopover() {
   _delPopAction = null;
 }
 
+/* ── 復原提示條 ──
+   刪除後在畫面下方停留幾秒，按「復原」把東西放回去。一次只顯示一條：
+   新的刪除會取代舊的（舊的那次就不能再復原了）。 */
+const UNDO_TOAST_MS = 8000;
+let _undoTimer = null;
+let _undoAction = null;
+
+function showUndoToast(text, onUndo) {
+  const bar = $('undo-toast');
+  if (!bar) return;
+  $('undo-toast-text').textContent = text;
+  _undoAction = onUndo;
+  bar.classList.add('show');
+  clearTimeout(_undoTimer);
+  _undoTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
+}
+
+function hideUndoToast() {
+  clearTimeout(_undoTimer);
+  _undoTimer = null;
+  _undoAction = null;
+  $('undo-toast')?.classList.remove('show');
+}
+
+$('undo-toast-btn').addEventListener('click', async () => {
+  const action = _undoAction;
+  hideUndoToast();
+  if (!action) return;
+  try { await action(); }
+  catch (err) {
+    console.warn('undo:', err);
+    showModal({ title: t('undo.failed'), desc: String(err?.message || err), confirmText: t('msg.gotIt') });
+  }
+});
+$('undo-toast-close').addEventListener('click', hideUndoToast);
+// 滑鼠停在提示條上時不要倒數消失，移開後重新計時
+$('undo-toast').addEventListener('mouseenter', () => clearTimeout(_undoTimer));
+$('undo-toast').addEventListener('mouseleave', () => {
+  if (_undoAction) _undoTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
+});
+
 function deleteSelectedMessages() {
   const ids = [...S.selSet];
   const cls = classifiedIds();
   const wasUnclassified = ids.filter(id => !cls.has(id)).length;
-  idbDeleteMessages(ids).catch(err => console.warn('idbDeleteMessages:', err));
   const idSet = new Set(ids);
+  // 復原用：訊息本體，以及各資料夾裡被拿掉的 id 與原本的位置
+  const removedMsgs = S.allMessages.filter(m => idSet.has(m.id));
+  const removedRefs = [];
+  S.folders.forEach(f => {
+    const hits = [];
+    f.msgIds.forEach((id, i) => { if (idSet.has(id)) hits.push({ id, i }); });
+    if (hits.length) removedRefs.push({ folderId: f.id, hits });
+  });
+
+  idbDeleteMessages(ids).catch(err => console.warn('idbDeleteMessages:', err));
   S.allMessages = S.allMessages.filter(m => !idSet.has(m.id));
   S.folders.forEach(f => { f.msgIds = f.msgIds.filter(id => !S.selSet.has(id)); });
   // 直接從 DOM 移除，避免重繪導致捲動位置跳回頂部
@@ -1303,6 +1353,29 @@ function deleteSelectedMessages() {
   renderRight();
   adjustUnclassifiedCount(-wasUnclassified);
   save();
+
+  showUndoToast(tf('undo.msgs', ids.length), async () => {
+    await idbPutMessages(removedMsgs);
+    let restoredToFolder = 0;
+    removedRefs.forEach(({ folderId, hits }) => {
+      const f = S.folders.find(x => x.id === folderId);
+      if (!f) return;                       // 資料夾在這期間被刪了：訊息回到未歸類
+      const have = new Set(f.msgIds);
+      // 由前往後插回原位置；資料夾內容在這期間變動過的話，位置盡量靠近原處
+      hits.forEach(({ id, i }) => {
+        if (have.has(id)) return;
+        f.msgIds.splice(Math.min(i, f.msgIds.length), 0, id);
+        restoredToFolder++;
+      });
+    });
+    adjustUnclassifiedCount(removedMsgs.length - restoredToFolder);
+    captureCurrentScrollAnchor();
+    renderFolders();
+    renderRight();
+    save();
+    await renderMsgs();
+    restoreScrollAnchor();
+  });
 }
 
 $('trash-confirm-cancel').addEventListener('click', closeDeletePopover);
@@ -1803,12 +1876,38 @@ $('menu-item-del').addEventListener('click', () => {
 });
 
 function deleteFolder(folder) {
+  // 復原用：原本的位置、原本掛在它底下的子資料夾
+  const index = S.folders.indexOf(folder);
+  const childIds = S.folders.filter(f => f.parentId === folder.id).map(f => f.id);
+  const wasCollapsed = S.collapsedFolders.has(folder.id);
+
   S.folders.forEach(f => { if (f.parentId === folder.id) f.parentId = null; });
   S.folders = S.folders.filter(f => f.id !== folder.id);
   // 該資料夾自身的訊息回到未歸類（子資料夾僅升級為頂層，msgIds 不受影響）
   adjustUnclassifiedCount(folder.msgIds.length);
   if (S.view === folder.id) { switchView(null, t('folder.uncategorized')); save(); }
   else { renderFolders(); renderRight(); save(); }
+
+  showUndoToast(tf('undo.folder', folder.name), async () => {
+    if (S.folders.some(f => f.id === folder.id)) return;
+    // 這期間已被歸到別的資料夾的訊息就留在那邊，不搶回來
+    const cls = classifiedIds();
+    folder.msgIds = folder.msgIds.filter(id => !cls.has(id));
+    // 上層資料夾也被刪掉的話，改放在最外層
+    if (folder.parentId && !S.folders.some(f => f.id === folder.parentId)) folder.parentId = null;
+    S.folders.splice(Math.min(Math.max(index, 0), S.folders.length), 0, folder);
+    childIds.forEach(id => {
+      const c = S.folders.find(f => f.id === id);
+      if (c && c.parentId == null) c.parentId = folder.id;
+    });
+    if (wasCollapsed) S.collapsedFolders.add(folder.id);
+    adjustUnclassifiedCount(-folder.msgIds.length);
+    renderFolders();
+    renderRight();
+    save();
+    // 目前停在「未歸類」時，那些訊息要從列表裡消失
+    if (S.view === null) await renderMsgs();
+  });
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -3675,6 +3774,33 @@ $('sys-settings-btn').addEventListener('click', () => {
   $('set-lang').value = S.settings.lang || 'zh-TW';
   updateFontScaleLabel();
   $('settings-overlay').style.display = 'flex';
+  refreshStorageInfo();
+});
+
+// 設定視窗裡的「儲存空間」：用量、是否受保護、申請保護鍵
+let _storageInfoSeq = 0;
+async function refreshStorageInfo(deniedNote = false) {
+  const seq = ++_storageInfoSeq;
+  const usageEl = $('storage-usage'), stateEl = $('storage-state'), btn = $('storage-protect-btn');
+  if (!usageEl || !stateEl || !btn) return;
+  usageEl.textContent = t('storage.loading');
+  const [est, persisted] = await Promise.all([storageEstimate(), storageIsPersisted()]);
+  if (seq !== _storageInfoSeq) return;
+  usageEl.textContent = est
+    ? tf('storage.usage', formatBytes(est.usage), formatBytes(est.quota))
+    : t('storage.usageUnknown');
+  stateEl.classList.toggle('ok', persisted === true);
+  stateEl.classList.toggle('warn', persisted !== true);
+  if (persisted === true)       stateEl.textContent = t('storage.persisted');
+  else if (persisted === null)  stateEl.textContent = t('storage.unsupported');
+  else                          stateEl.textContent = deniedNote ? t('storage.denied') : t('storage.notPersisted');
+  btn.hidden = persisted !== false;
+}
+$('storage-protect-btn').addEventListener('click', async () => {
+  $('storage-protect-btn').disabled = true;
+  const ok = await requestStoragePersist(true);
+  $('storage-protect-btn').disabled = false;
+  refreshStorageInfo(ok === false);
 });
 $('settings-close-btn').addEventListener('click', () => $('settings-overlay').style.display = 'none');
 // 與 icon picker 行為一致：點擊視窗外部也可關閉
@@ -3693,6 +3819,7 @@ $('set-lang').addEventListener('change', e => {
   if (S.rightTab === 'songs') renderSongsList(); else renderRight();
   if (document.body.classList.contains('site-mode')) renderSitePage(SS.currentPage);
   showBackupReminderIfDue();   // 橫幅文字含天數，非靜態 data-i18n 節點
+  refreshStorageInfo();
 });
 $('set-font-dec').addEventListener('click', () => {
   S.settings.fontScale = clampFontScale((S.settings.fontScale || 100) - FONT_SCALE_STEP);
@@ -3743,6 +3870,8 @@ openDB().then(async () => {
   ]);
   // 還原捲動位置到 reload 前的訊息
   restoreScrollAnchor();
+  // 已經有資料的使用者：請瀏覽器不要在空間不足時自動清掉
+  if (S.folders.length || S.msgCount > 0 || S.songs.length) requestStoragePersist();
   // 清理 folder.msgIds 中失效引用（歷史遺留的孤立 ID）
   await pruneOrphanMsgIds();
   renderFolders(); // 計數更新後刷新資料夾

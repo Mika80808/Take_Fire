@@ -13,7 +13,7 @@ const FILTER_PRESETS = [
 const FILTER_LS_KEY   = 'tak_fire_filters_v1';
 const FILTER_LUT_SIZE = 17;      // 儲存與分析用的 LUT 網格大小
 const FILTER_THUMB    = 220;     // 濾鏡庫預覽圖長邊 px
-const FILTER_SAMPLE   = 'assets/photo-1.png';   // 濾鏡庫固定用這張當範例
+const FILTER_SAMPLE   = 'assets/filter-sample.jpg';   // 濾鏡庫固定用這張當範例（已縮到預覽所需大小）
 
 Object.assign(I18N['zh-TW'], {
   'flt.title'      : '濾鏡提示詞',
@@ -439,7 +439,7 @@ function fltIgToggle() {
 
 function fltIgSyncToggle() {
   const btn = $('ig-flt-toggle'); if (!btn) return;
-  btn.hidden = !_igFltPoster?.isLocal;
+  btn.hidden = !_igFltPoster;
   btn.classList.toggle('open', _igFltOpen);
   btn.classList.toggle('has-filter', !!_igFltSel);
   btn.setAttribute('aria-expanded', String(_igFltOpen));
@@ -461,7 +461,7 @@ async function fltIgBuildStrip() {
   const wrap = $('ig-flt'), strip = $('ig-flt-strip'), poster = _igFltPoster;
   if (!wrap || !strip) return;
   fltIgSyncToggle();
-  wrap.hidden = !(poster?.isLocal && _igFltOpen);
+  wrap.hidden = !(poster && _igFltOpen);
   if (wrap.hidden) { strip.innerHTML = ''; return; }
   strip.innerHTML = '';
   $('ig-flt-hint').textContent = FLT.filters.length ? t('flt.holdHint') : t('flt.noFilters');
