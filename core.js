@@ -752,22 +752,56 @@ function formatBytes(n) {
   return `${Math.max(1, Math.round(n / 1024))} KB`;
 }
 
+// 給人看的名稱：哪一個檔案沒能放進備份
+function describeBackupRecord(store, rec) {
+  const song = id => (S.songs.find(x => x.id === id)?.title || '').trim() || t('exp.untitledSong');
+  if (store === 'posters')     return `${t('exp.kind.photo')}：${rec.label || rec.caption || rec.id}`;
+  if (store === 'song_mp3s')   return `${t('exp.kind.mp3')}：${song(rec.songId)}${rec.fileName ? `（${rec.fileName}）` : ''}`;
+  if (store === 'song_covers') return `${t('exp.kind.cover')}：${song(rec.songId)}`;
+  if (store === 'backgrounds') return `${t('exp.kind.bg')}：${rec.name || rec.label || rec.id}`;
+  if (store === 'app_assets') {
+    if (rec.key === 'avatarChar')   return `${t('exp.kind.avatar')}：${t('left.avatarChar')}`;
+    if (rec.key === 'avatarPlayer') return `${t('exp.kind.avatar')}：${t('left.avatarPlayer')}`;
+    return `${t('exp.kind.memberPhoto')}：${rec.key}`;
+  }
+  return `${store}：${rec.id ?? ''}`;
+}
+
 async function exportAllData() {
   saveNow();
   // 紀錄裡的 Blob 換成 { file, type, size } 指向 zip 內的媒體檔
   const idb = {};
   const media = [];
+  // 讀不出來的媒體檔。瀏覽器把圖片與音檔另外存成磁碟上的檔案，那個檔案遺失或損毀時
+  // （磁碟清理、瀏覽器異常關閉等）紀錄還在、內容卻讀不到。遇到這種檔案只跳過它並回報，
+  // 不能讓一個壞檔擋住整份備份——那樣使用者連其他完好的資料都救不出來。
+  const skipped = [];
   for (const name of IMPORT_STORES) {
     const records = await idbGetAll(name);
-    idb[name] = records.map((raw, i) => {
-      const rec = stripDerivedFields(raw);
-      if (!(rec?.blob instanceof Blob)) return rec;
+    const out = [];
+    for (let i = 0; i < records.length; i++) {
+      const rec = stripDerivedFields(records[i]);
+      if (!(rec?.blob instanceof Blob)) { out.push(rec); continue; }
       const type = rec.blob.type || 'application/octet-stream';
+      let data;
+      try {
+        // 先整個讀進記憶體：確認讀得到，之後打包與寫檔也不會再碰磁碟上那個可能有問題的檔案
+        data = new Blob([await rec.blob.arrayBuffer()], { type });
+      } catch (err) {
+        console.warn(`export: unreadable blob in ${name}`, rec, err);
+        skipped.push(describeBackupRecord(name, rec));
+        continue;
+      }
       const file = `media/${name}/${i}.${MEDIA_EXT[type] || 'bin'}`;
-      media.push({ name: file, blob: rec.blob });
-      return { ...rec, blob: { file, type, size: rec.blob.size } };
-    });
+      media.push({ name: file, blob: data });
+      out.push({ ...rec, blob: { file, type, size: data.size } });
+    }
+    idb[name] = out;
   }
+  const skippedNote = skipped.length
+    ? '\n\n' + tf('msg.exportSkipped', skipped.length) + '\n' + skipped.slice(0, 12).map(x => `・${x}`).join('\n')
+      + (skipped.length > 12 ? `\n… +${skipped.length - 12}` : '')
+    : '';
   const payload = {
     app: 'take_fire',
     version: 3,
@@ -798,7 +832,7 @@ async function exportAllData() {
     markBackupDone();
     showModal({
       title: t('msg.exportDone'),
-      desc: tf('msg.exportedFile', fileName),
+      desc: tf('msg.exportedFile', fileName) + skippedNote,
       confirmText: t('msg.ok')
     });
   };
@@ -824,7 +858,7 @@ async function exportAllData() {
       markBackupDone();
       showModal({
         title: t('msg.exportDone'),
-        desc: t('msg.exportSavedToPath'),
+        desc: t('msg.exportSavedToPath') + skippedNote,
         confirmText: t('msg.ok')
       });
     } catch (e) {
@@ -1248,6 +1282,14 @@ const I18N = {
     'song.uploadedCover': '已上傳封面',
     'song.uploadedAs': '已上傳：%s',
     'imp.exportFail': '匯出失敗',
+    'msg.exportSkipped': '注意：有 %s 個檔案已損毀、讀不出來，沒有放進備份。這些項目請重新上傳：',
+    'exp.kind.photo': '照片',
+    'exp.kind.mp3': 'MP3',
+    'exp.kind.cover': '歌曲封面',
+    'exp.kind.bg': '背景圖',
+    'exp.kind.avatar': '頭像',
+    'exp.kind.memberPhoto': '成員照片',
+    'exp.untitledSong': '未命名歌曲',
     'imp.exportFailDesc': '備份匯出失敗：%s',
     'imp.importBackup': '匯入備份',
     'imp.importWarn': '匯入備份將完整覆蓋現有所有資料（對話、歌曲、圖片等），此操作無法復原。\n\n確定要繼續嗎？',
@@ -1571,6 +1613,14 @@ const I18N = {
     'song.uploadedCover': 'Cover uploaded',
     'song.uploadedAs': 'Uploaded: %s',
     'imp.exportFail': 'Export failed',
+    'msg.exportSkipped': 'Note: %s file(s) are damaged and could not be read, so they are not in the backup. Please upload these again:',
+    'exp.kind.photo': 'Photo',
+    'exp.kind.mp3': 'MP3',
+    'exp.kind.cover': 'Song cover',
+    'exp.kind.bg': 'Background',
+    'exp.kind.avatar': 'Avatar',
+    'exp.kind.memberPhoto': 'Member photo',
+    'exp.untitledSong': 'Untitled song',
     'imp.exportFailDesc': 'Backup export failed: %s',
     'imp.importBackup': 'Import backup',
     'imp.importWarn': 'Importing a backup will overwrite ALL existing data (messages, songs, images, etc). This cannot be undone.\n\nContinue?',
