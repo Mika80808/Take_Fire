@@ -544,6 +544,23 @@
   <div class="folder-menu-item danger" id="menu-item-del" data-i18n="menu.deleteFolder"> 刪除資料夾</div>
 </div>
 
+<!-- ── 單則訊息選單（訊息右下角的 ⋯） ─────────────────────── -->
+<div id="msg-menu" role="menu">
+  <button type="button" class="folder-menu-item" role="menuitem" data-act="copy">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+    <span data-i18n="msgMenu.copy">複製</span>
+  </button>
+  <button type="button" class="folder-menu-item" role="menuitem" data-act="edit">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+    <span data-i18n="msgMenu.edit">編輯</span>
+  </button>
+  <div class="folder-menu-divider"></div>
+  <button type="button" class="folder-menu-item danger" role="menuitem" data-act="delete">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+    <span data-i18n="msgMenu.delete">刪除</span>
+  </button>
+</div>
+
 <!-- Icon Picker Modal -->
 <div id="icon-picker-overlay" style="position:fixed;inset:0;background:rgb(0 0 0/0.20);z-index:10010;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);">
   <div style="background:var(--c-bg);border:1px solid rgb(var(--c-primary-rgb)/0.12);border-radius:var(--radius-xl);padding:28px 24px;width:300px;max-width:92vw;box-shadow:var(--shadow-lg);">

@@ -1519,7 +1519,8 @@ body[data-theme="WhiteNoise"] .modal-desc { color: #a34520; }
 .btn-primary:hover { box-shadow: var(--shadow-float); }
 
 /* ── Context Menu ───────────────────────────────────── */
-#folder-menu {
+#folder-menu,
+#msg-menu {
   position: fixed;
   background: rgb(var(--c-bg-rgb) / 0.92);
   backdrop-filter: blur(12px);
@@ -3592,3 +3593,57 @@ body.file-dragging #drop-overlay { display: flex; }
   text-align: center;
 }
 .drop-overlay-box svg { color: var(--c-accent); }
+
+/* ── 單則訊息選單 ───────────────────────────────────────── */
+#msg-menu { min-width: 132px; }
+#msg-menu .folder-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+#msg-menu .folder-menu-item:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+
+.msg-bubble-box { position: relative; min-width: 0; }
+/* 「⋯」按鈕：半掛在泡泡右下角。平時隱藏，滑到該則訊息、鍵盤聚焦或選單開著時出現 */
+.msg-menu-btn {
+  position: absolute;
+  right: 10px;
+  bottom: -11px;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--c-primary-rgb) / 0.3);
+  border-radius: 11px;
+  background: var(--c-bg);
+  color: var(--c-text-mute);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.msg-row:hover .msg-menu-btn,
+.msg-system-divider:hover .msg-menu-btn,
+.menu-open .msg-menu-btn,
+.msg-menu-btn:focus-visible { opacity: 1; }
+.msg-menu-btn:hover,
+.msg-menu-btn.open { color: var(--c-text); border-color: var(--c-accent); }
+.msg-menu-btn:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+/* 系統訊息沒有泡泡，按鈕放在文字區塊的右下角 */
+.msg-system-divider .msg-menu-btn { right: max(4%, calc(50% - 280px)); bottom: 2px; }
+/* 觸控裝置沒有滑鼠懸停：按鈕常駐顯示，並加大好按 */
+@media (hover: none) {
+  .msg-menu-btn { opacity: 0.75; width: 32px; height: 26px; bottom: -13px; border-radius: 13px; }
+}
+
+/* ── 編輯訊息：加寬加高的視窗 ───────────────────────────── */
+.modal-box.wide { width: min(760px, 92vw); max-width: 92vw; }
+.modal-box.wide .modal-textarea-field {
+  height: min(60vh, 560px);
+  min-height: 200px;
+  font-size: calc(14.5px * var(--font-scale, 1));
+  text-align: left;
+}
