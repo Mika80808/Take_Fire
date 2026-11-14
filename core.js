@@ -392,12 +392,21 @@ async function idbDeleteMessages(ids) {
   });
 }
 
+// 所有訊息的指紋（匯入時去重用）。
+// 注意：index.getAllKeys() 回傳的是「主鍵」（訊息 id）而不是索引鍵，拿來比對指紋永遠對不上；
+// 要用 key cursor 逐筆讀 cursor.key 才是 fp 的值。key cursor 不會反序列化訊息本體，量大也快。
 async function idbGetAllFingerprints() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('messages', 'readonly');
-    const req = tx.objectStore('messages').index('fp').getAllKeys();
-    req.onsuccess = () => resolve(new Set(req.result || []));
+    const fps = new Set();
+    const req = tx.objectStore('messages').index('fp').openKeyCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) { resolve(fps); return; }
+      fps.add(cursor.key);
+      cursor.continue();
+    };
     req.onerror = e => reject(e.target.error);
   });
 }
@@ -1128,7 +1137,7 @@ const I18N = {
     'msg.edited': '編輯內容',
     'msg.editingFor': '正在編輯 %s 的對話：',
     'msg.confirmDelete': '確認刪除',
-    'msg.deleteN': '確定要刪除選取的 %s 則訊息嗎？\n此操作無法復原。',
+    'msg.deleteN': '確定要刪除選取的 %s 則訊息嗎？',
     'trash.confirm': '刪除這 %s 則訊息？',
     'trash.confirmFolder': '刪除資料夾「%s」？裡面的訊息會回到未歸類。',
     'trash.folderChildrenNote': '子資料夾會移到最上層。',
@@ -1239,6 +1248,13 @@ const I18N = {
     'imp.importWarn': '匯入備份將完整覆蓋現有所有資料（對話、歌曲、圖片等），此操作無法復原。\n\n確定要繼續嗎？',
     'imp.pickFile': '選擇備份檔',
     'imp.importing': '匯入中…',
+    'imp.summary': '已匯入 %s 則訊息',
+    'imp.summaryDup': '已匯入 %s 則訊息，略過 %s 則重複',
+    'imp.allDup': '沒有新訊息：這 %s 則之前都匯入過了',
+    'imp.noMsgs': '檔案裡找不到對話訊息，請確認是對話紀錄的 .txt 檔',
+    'imp.notTxt': '只能匯入 .txt 檔案',
+    'imp.failTitle': '匯入失敗',
+    'imp.dropHint': '放開以匯入 .txt 對話紀錄',
     'imp.importDone': '匯入完成',
     'imp.importDoneDesc': '備份已成功還原。即將重新載入應用程式。',
     'imp.importFail': '匯入失敗',
@@ -1260,7 +1276,7 @@ const I18N = {
     'backup.remindText': '距上次備份已 %s 天，期間有新的改動。資料只存在這台裝置，建議現在匯出一份。',
     'backup.exportNow': '立即匯出',
     'backup.later': '稍後',
-    'search.open': '搜尋訊息',
+    'search.open': '搜尋訊息（Ctrl+F）',
     'search.title': '全文搜尋',
     'search.placeholder': '搜尋訊息內容…',
     'search.currentOnly': '只搜尋目前資料夾',
@@ -1439,7 +1455,7 @@ const I18N = {
     'msg.edited': 'Edit content',
     'msg.editingFor': 'Editing %s’s message:',
     'msg.confirmDelete': 'Confirm delete',
-    'msg.deleteN': 'Delete %s selected message(s)?\nThis cannot be undone.',
+    'msg.deleteN': 'Delete %s selected message(s)?',
     'trash.confirm': 'Delete %s message(s)?',
     'trash.confirmFolder': 'Delete folder “%s”? Its messages return to Uncategorized.',
     'trash.folderChildrenNote': ' Sub-folders move to the top level.',
@@ -1550,6 +1566,13 @@ const I18N = {
     'imp.importWarn': 'Importing a backup will overwrite ALL existing data (messages, songs, images, etc). This cannot be undone.\n\nContinue?',
     'imp.pickFile': 'Choose backup',
     'imp.importing': 'Importing…',
+    'imp.summary': 'Imported %s message(s)',
+    'imp.summaryDup': 'Imported %s message(s), skipped %s duplicate(s)',
+    'imp.allDup': 'Nothing new: all %s message(s) were imported before',
+    'imp.noMsgs': 'No chat messages found. Make sure this is a chat log .txt file.',
+    'imp.notTxt': 'Only .txt files can be imported',
+    'imp.failTitle': 'Import failed',
+    'imp.dropHint': 'Drop to import .txt chat logs',
     'imp.importDone': 'Import complete',
     'imp.importDoneDesc': 'Backup restored. The app will reload.',
     'imp.importFail': 'Import failed',
@@ -1571,7 +1594,7 @@ const I18N = {
     'backup.remindText': 'Last backup was %s days ago and there have been changes since. Your data lives only on this device — export a copy now.',
     'backup.exportNow': 'Export now',
     'backup.later': 'Later',
-    'search.open': 'Search messages',
+    'search.open': 'Search messages (Ctrl+F)',
     'search.title': 'Search',
     'search.placeholder': 'Search message text…',
     'search.currentOnly': 'Current folder only',

@@ -1292,11 +1292,13 @@ const UNDO_TOAST_MS = 8000;
 let _undoTimer = null;
 let _undoAction = null;
 
-function showUndoToast(text, onUndo) {
+// onUndo 省略時只是一條會自己消失的通知，不顯示「復原」鍵
+function showUndoToast(text, onUndo = null) {
   const bar = $('undo-toast');
   if (!bar) return;
   $('undo-toast-text').textContent = text;
   _undoAction = onUndo;
+  $('undo-toast-btn').hidden = !onUndo;
   bar.classList.add('show');
   clearTimeout(_undoTimer);
   _undoTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
@@ -1323,7 +1325,11 @@ $('undo-toast-close').addEventListener('click', hideUndoToast);
 // 滑鼠停在提示條上時不要倒數消失，移開後重新計時
 $('undo-toast').addEventListener('mouseenter', () => clearTimeout(_undoTimer));
 $('undo-toast').addEventListener('mouseleave', () => {
-  if (_undoAction) _undoTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
+  if (!$('undo-toast').classList.contains('show')) return;
+  // 先清掉現有的計時器：提示條可能是在游標底下直接出現的（沒有觸發 mouseenter），
+  // 不清的話舊計時器會變成孤兒，時間一到把之後才出現的提示條提早關掉
+  clearTimeout(_undoTimer);
+  _undoTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
 });
 
 function deleteSelectedMessages() {
@@ -2981,67 +2987,136 @@ $('import-backup-input').addEventListener('change', async e => {
   }
 });
 
-$('file-input').addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (!files.length) return;
+// 匯入 .txt 對話紀錄（選檔按鈕與拖放共用）。完成後在下方提示條回報結果，新增的訊息可以復原。
+let _importing = false;
+async function importTxtFiles(fileList) {
+  const files = Array.from(fileList || []).filter(f => /\.txt$/i.test(f.name) || f.type === 'text/plain');
+  if (!files.length) { showUndoToast(t('imp.notTxt')); return; }
+  if (_importing) return;
+  _importing = true;
 
   // 顯示 loading
   $('mid-header-title').textContent = t('imp.importing');
   $('message-list').innerHTML = `<div class="empty-state"><small>${esc(t('msg.parsing'))}</small></div>`;
 
-  // 取得已存在的 fingerprints（去重用）
-  const existingFps = await idbGetAllFingerprints();
+  const addedIds = [];
+  let skipped = 0;
+  let failed = null;
 
-  let hasNew = false;
+  try {
+    // 取得已存在的 fingerprints（去重用）
+    const existingFps = await idbGetAllFingerprints();
 
-  for (const file of files) {
-    const text = await file.text();
+    for (const file of files) {
+      const text = await file.text();
 
-    // 從標題區塊擷取角色名稱
-    const headerMatch = text.match(/^={10,}\r?\n(.+?)\s*-\s*.+?\r?\n/);
-    if (headerMatch && headerMatch[1]) {
-      const charName = headerMatch[1].trim();
-      if (charName) {
-        S.nameOrder = S.nameOrder.filter(n => n !== charName);
-        S.nameOrder.unshift(charName);
+      // 從標題區塊擷取角色名稱
+      const headerMatch = text.match(/^={10,}\r?\n(.+?)\s*-\s*.+?\r?\n/);
+      if (headerMatch && headerMatch[1]) {
+        const charName = headerMatch[1].trim();
+        if (charName) {
+          S.nameOrder = S.nameOrder.filter(n => n !== charName);
+          S.nameOrder.unshift(charName);
+        }
       }
-    }
 
-    const parsed = parseTxt(text);
-    parsed.forEach(m => { if (m.type === 'msg') registerName(m.name); });
+      const parsed = parseTxt(text);
+      parsed.forEach(m => { if (m.type === 'msg') registerName(m.name); });
 
-    // 過濾重複，加上 fp
-    const toInsert = [];
-    for (const msg of parsed) {
-      const fp = msgFingerprint(msg);
-      if (!existingFps.has(fp)) {
+      // 過濾重複，加上 fp
+      const toInsert = [];
+      for (const msg of parsed) {
+        const fp = msgFingerprint(msg);
+        if (existingFps.has(fp)) { skipped++; continue; }
         existingFps.add(fp);
         toInsert.push({ ...msg, fp });
-        hasNew = true;
       }
-    }
 
-    // 分批寫入 IDB（每批 500 則，讓 UI 保持回應）
-    const BATCH = 500;
-    for (let i = 0; i < toInsert.length; i += BATCH) {
-      await idbPutMessages(toInsert.slice(i, i + BATCH));
-      await new Promise(r => setTimeout(r, 0));
+      // 分批寫入 IDB（每批 500 則，讓 UI 保持回應）
+      const BATCH = 500;
+      for (let i = 0; i < toInsert.length; i += BATCH) {
+        const batch = toInsert.slice(i, i + BATCH);
+        await idbPutMessages(batch);
+        batch.forEach(m => addedIds.push(m.id));
+        await new Promise(r => setTimeout(r, 0));
+      }
+      // 即時更新計數（不需重掃 IDB）
+      if (toInsert.length > 0) adjustUnclassifiedCount(toInsert.length);
     }
-    // 即時更新計數（不需重掃 IDB）
-    if (toInsert.length > 0) adjustUnclassifiedCount(toInsert.length);
+  } catch (err) {
+    console.warn('importTxtFiles:', err);
+    failed = err;
   }
 
-  if (hasNew) S.view = null;
+  if (addedIds.length) S.view = null;
 
   updateMidHeaderTitle();
-
   renderFolders();
   await renderMsgs();
   renderRight();
   save();
   updateAvatarSlotUI();
+  _importing = false;
+
+  if (failed) {
+    notifyStorageError(failed, 'media');
+    showModal({ title: t('imp.failTitle'), desc: String(failed?.message || failed), confirmText: t('msg.gotIt') });
+    return;
+  }
+  if (!addedIds.length) {
+    showUndoToast(skipped ? tf('imp.allDup', skipped) : t('imp.noMsgs'));
+    return;
+  }
+  const text = skipped ? tf('imp.summaryDup', addedIds.length, skipped) : tf('imp.summary', addedIds.length);
+  showUndoToast(text, async () => {
+    // 只收回這次新增、而且還留在「未歸類」的訊息；已經歸到資料夾的就當作使用者要留下
+    const cls = classifiedIds();
+    const ids = addedIds.filter(id => !cls.has(id));
+    await idbDeleteMessages(ids);
+    await refreshUnclassifiedCount();
+    await renderMsgs();
+    renderRight();
+  });
+}
+
+$('file-input').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
   e.target.value = '';
+  if (files.length) importTxtFiles(files);
 });
+
+/* ── 把 .txt 檔拖進視窗即匯入 ──
+   只處理從電腦拖進來的檔案（dataTransfer 帶有 Files）。訊息與資料夾的拖曳是用滑鼠事件
+   自己做的，不會經過這裡。 */
+(function initFileDrop() {
+  let depth = 0;   // dragenter / dragleave 會在每個子元素上各觸發一次，用計數判斷是否真的離開視窗
+  const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
+  const canImport = () => !document.body.classList.contains('site-mode') && !anyOverlayOpen();
+  const end = () => { depth = 0; document.body.classList.remove('file-dragging'); };
+
+  window.addEventListener('dragenter', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    if (canImport()) document.body.classList.add('file-dragging');
+  });
+  window.addEventListener('dragover', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();   // 不擋的話，放開檔案時瀏覽器會直接開啟它、離開這個頁面
+    e.dataTransfer.dropEffect = canImport() ? 'copy' : 'none';
+  });
+  window.addEventListener('dragleave', e => {
+    if (!hasFiles(e)) return;
+    if (--depth <= 0) end();
+  });
+  window.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const ok = canImport();
+    end();
+    if (ok) importTxtFiles(e.dataTransfer.files);
+  });
+})();
 
 /* ══════════════════════════════════════════════════════════
    Add folder
@@ -3716,17 +3791,93 @@ $('msg-search-overlay').addEventListener('click', e => {
 });
 $('msg-search-input').addEventListener('input', scheduleSearch);
 $('msg-search-scope').addEventListener('change', performSearch);
+// 有任何彈窗、面板或導覽開著：此時快捷鍵與拖放匯入都不該作用在後面的畫面上
+function anyOverlayOpen() {
+  const shown = id => { const el = $(id); return !!el && getComputedStyle(el).display !== 'none'; };
+  return shown('modal-overlay') || shown('settings-overlay') || shown('icon-picker-overlay')
+    || $('msg-search-overlay').classList.contains('open')
+    || $('trash-confirm').classList.contains('open')
+    || !!document.querySelector('.guide-blocker');
+}
+
+function selectAllMessages() {
+  const ids = visibleMsgs().filter(m => m.type === 'msg').map(m => m.id);
+  if (!ids.length) return;
+  S.selAnchor = ids[0];
+  S.selEnd    = ids[ids.length - 1];
+  S.selSet    = new Set(ids);
+  applySelectionDOM();
+}
+
+// 依左欄目前看得到的順序切到上一個／下一個資料夾
+function stepFolder(delta) {
+  const items = [...$('folder-list').querySelectorAll('.folder-item[data-folder-id]')];
+  if (items.length < 2) return;
+  const cur = items.findIndex(el => el.classList.contains('active'));
+  const next = items[Math.min(Math.max((cur === -1 ? 0 : cur) + delta, 0), items.length - 1)];
+  if (!next || next === items[cur]) return;
+  next.click();
+  next.scrollIntoView({ block: 'nearest' });
+}
+
+/* ── Story Mode 快捷鍵 ──
+   Ctrl/Cmd+F（或 K）搜尋、Ctrl/Cmd+A 全選、Delete 刪除選取、Esc 取消選取、Alt+↑/↓ 切換資料夾。
+   正在輸入文字、或有彈窗開著時一律不攔，交還給瀏覽器原本的行為。 */
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && $('msg-search-overlay').classList.contains('open')) {
+  const searchOpen = $('msg-search-overlay').classList.contains('open');
+  if (e.key === 'Escape' && searchOpen) {
     closeSearchPanel();
     return;
   }
-  // Ctrl / Cmd + K：不搶瀏覽器原生的 Ctrl+F
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
-    if (document.body.classList.contains('site-mode')) return;
+  if (document.body.classList.contains('site-mode')) return;
+
+  const mod = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+  const key = e.key.toLowerCase();
+
+  // 搜尋。面板已經開著時再按一次 Ctrl+F 就放行，讓瀏覽器自己的頁內尋找還是叫得出來
+  if (mod && (key === 'f' || key === 'k')) {
+    if (searchOpen) {
+      if (key === 'k') e.preventDefault();
+      return;
+    }
+    if (anyOverlayOpen()) return;
     e.preventDefault();
     openSearchPanel();
+    return;
   }
+
+  if (anyOverlayOpen()) return;
+  const typing = e.target instanceof Element
+    && e.target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+  if (typing) return;
+
+  if (mod && key === 'a') {
+    e.preventDefault();
+    selectAllMessages();
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    stepFolder(e.key === 'ArrowUp' ? -1 : 1);
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if ((e.key === 'Delete' || e.key === 'Backspace') && S.selSet.size) {
+    e.preventDefault();
+    const trash = $('trash-drop');
+    // 左欄收起來（全螢幕、手機）時垃圾桶不在畫面上，小確認框沒地方貼，改用一般確認視窗
+    if (trash && trash.getClientRects().length) confirmDelete(trash);
+    else showModal({
+      title: t('modal.delete'),
+      desc: tf('msg.deleteN', S.selSet.size),
+      confirmText: t('modal.delete'),
+      confirmClass: 'btn-danger',
+      onConfirm: deleteSelectedMessages
+    });
+    return;
+  }
+  if (e.key === 'Escape' && !e.defaultPrevented && S.selSet.size) clearSel();
 });
 
 /* ══════════════════════════════════════════════════════════

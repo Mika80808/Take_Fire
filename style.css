@@ -25,6 +25,7 @@
   --z-menu            : 10001; /* 內容選單需蓋過彈窗，故在其上 */
   --z-trash-confirm   : 10002; /* 刪除訊息的小確認框，貼在垃圾桶上方 */
   --z-undo-toast      : 10003; /* 刪除後的復原提示條 */
+  --z-drop-overlay    : 10004; /* 檔案拖進視窗時的匯入提示 */
   --z-tour-modal      : 10010;
   --z-guide           : 10020; /* Story Mode 新手導覽，蓋過其他一切 */
 }
@@ -3562,3 +3563,32 @@ body.poster-dragging, body.poster-dragging * { cursor: grabbing !important; }
 .storage-state.warn { color: rgb(var(--c-danger-rgb)); }
 .storage-protect-btn { align-self: flex-start; width: auto; padding: 6px 14px; font-size: 12.5px; }
 .storage-protect-btn[hidden] { display: none; }
+#undo-toast-btn[hidden] { display: none; }
+
+/* ── 拖放匯入提示 ───────────────────────────────────────── */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drop-overlay);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(var(--c-bg-rgb) / 0.82);
+  pointer-events: none;   /* 只是提示，不能擋住底下的拖放事件 */
+}
+body.file-dragging #drop-overlay { display: flex; }
+.drop-overlay-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 56px;
+  border: 2px dashed var(--c-accent);
+  border-radius: var(--radius-xl);
+  color: var(--c-text);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+.drop-overlay-box svg { color: var(--c-accent); }
