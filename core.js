@@ -777,7 +777,9 @@ async function exportAllData() {
   // 不能讓一個壞檔擋住整份備份——那樣使用者連其他完好的資料都救不出來。
   const skipped = [];
   for (const name of IMPORT_STORES) {
-    const records = await idbGetAll(name);
+    let records;
+    try { records = await idbGetAll(name); }
+    catch (e) { throw tagExportStage(e, 'read'); }
     const out = [];
     for (let i = 0; i < records.length; i++) {
       const rec = stripDerivedFields(records[i]);
@@ -817,10 +819,15 @@ async function exportAllData() {
   const _d = new Date();
   const stamp = `${toDateStr(_d)}_${String(_d.getHours()).padStart(2,'0')}-${String(_d.getMinutes()).padStart(2,'0')}`;
   const fileName = `take_fire_backup_${stamp}.zip`;
-  const manifest = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-  const blob = await buildZip([{ name: BACKUP_MANIFEST, blob: manifest }, ...media]);
+  let blob;
+  try {
+    const manifest = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    blob = await buildZip([{ name: BACKUP_MANIFEST, blob: manifest }, ...media]);
+  } catch (e) {
+    throw tagExportStage(e, 'pack');
+  }
 
-  const fallbackDownload = () => {
+  const fallbackDownload = (note = '') => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -832,12 +839,15 @@ async function exportAllData() {
     markBackupDone();
     showModal({
       title: t('msg.exportDone'),
-      desc: tf('msg.exportedFile', fileName) + skippedNote,
+      desc: (note ? note + '\n\n' : '') + tf('msg.exportedFile', fileName) + skippedNote,
       confirmText: t('msg.ok')
     });
   };
 
-  // 優先使用 File System Access API（可選擇儲存位置）
+  // 優先使用 File System Access API（可選擇儲存位置）。
+  // 這條路只要出任何錯（取消除外）都改走一般下載：備份檔已經在記憶體裡做好了，
+  // 不該因為「存到某個資料夾」這一步失敗就讓使用者拿不到備份。
+  // 例：選到雲端同步資料夾、或防毒軟體擋掉暫存檔時，寫入會丟出 NotFoundError。
   if (typeof window.showSaveFilePicker === 'function') {
     let handle;
     try {
@@ -847,27 +857,37 @@ async function exportAllData() {
       });
     } catch (e) {
       if (e.name === 'AbortError') return; // 使用者取消
-      // 沙箱／iframe／權限政策不允許時，退回 blob 下載
-      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') { fallbackDownload(); return; }
-      throw e;
+      console.warn('export: save picker failed, falling back to download', e);
+      fallbackDownload();
+      return;
     }
+    let writable = null;
     try {
-      const writable = await handle.createWritable();
+      writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
-      markBackupDone();
-      showModal({
-        title: t('msg.exportDone'),
-        desc: t('msg.exportSavedToPath') + skippedNote,
-        confirmText: t('msg.ok')
-      });
     } catch (e) {
-      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') { fallbackDownload(); return; }
-      throw e;
+      console.warn('export: writing to the chosen file failed, falling back to download', e);
+      try { await writable?.abort(); } catch (_) {}
+      fallbackDownload(t('msg.exportPickerFailed'));
+      return;
     }
+    markBackupDone();
+    showModal({
+      title: t('msg.exportDone'),
+      desc: t('msg.exportSavedToPath') + skippedNote,
+      confirmText: t('msg.ok')
+    });
   } else {
     fallbackDownload();
   }
+}
+
+// 匯出失敗時在訊息後面標出是哪一步，方便判斷原因
+function tagExportStage(err, stage) {
+  const e = err instanceof Error ? err : new Error(String(err));
+  e.message = `${e.message}（${t('exp.stage.' + stage)}）`;
+  return e;
 }
 
 const IMPORT_STORES = ['posters', 'song_covers', 'app_assets', 'song_mp3s', 'messages', 'backgrounds'];
@@ -1284,6 +1304,9 @@ const I18N = {
     'imp.exportFail': '匯出失敗',
     'msg.exportSkipped': '注意：有 %s 個檔案已損毀、讀不出來，沒有放進備份。這些項目請重新上傳：',
     'exp.kind.photo': '照片',
+    'exp.stage.read': '讀取資料時',
+    'exp.stage.pack': '打包備份檔時',
+    'msg.exportPickerFailed': '無法寫入你選的位置（可能是雲端同步資料夾或權限問題），已改用瀏覽器一般下載，請到「下載」資料夾找備份檔。',
     'exp.kind.mp3': 'MP3',
     'exp.kind.cover': '歌曲封面',
     'exp.kind.bg': '背景圖',
@@ -1615,6 +1638,9 @@ const I18N = {
     'imp.exportFail': 'Export failed',
     'msg.exportSkipped': 'Note: %s file(s) are damaged and could not be read, so they are not in the backup. Please upload these again:',
     'exp.kind.photo': 'Photo',
+    'exp.stage.read': 'while reading data',
+    'exp.stage.pack': 'while packing the backup',
+    'msg.exportPickerFailed': 'Could not write to the location you chose (it may be a cloud-synced folder or lack permission), so the backup was downloaded normally. Look for it in your Downloads folder.',
     'exp.kind.mp3': 'MP3',
     'exp.kind.cover': 'Song cover',
     'exp.kind.bg': 'Background',
